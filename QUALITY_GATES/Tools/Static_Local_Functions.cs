@@ -22,5 +22,18 @@ namespace QUALITY_GATES.Tools
                 ? 0
                 : Convert.ToInt32(row[column]);
         }
+        public static double GetDouble(DataRow row, string column)
+        {
+            return row[column] == DBNull.Value || row[column] == null
+                ? 0
+                : Convert.ToDouble(row[column]);
+        }
+
+        public static DateOnly GetDateOnly(DataRow row, string column)
+        {
+            return row[column] == DBNull.Value || row[column] == null
+                ? DateOnly.MinValue
+                : DateOnly.FromDateTime(Convert.ToDateTime(row[column]));
+        }
     }
 }

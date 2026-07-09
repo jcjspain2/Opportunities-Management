@@ -2,6 +2,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using System.Data;
 using System.Xml.Serialization;
+using System.Text.Json;
 
 namespace QUALITY_GATES.Data;
 
@@ -14,7 +15,7 @@ public class SqlConnectionFactory : IDbConnectionFactory
         _connectionString = configuration.GetConnectionString("DefaultConnection")
             ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found in configuration.");
     }
-   
+
     public async Task<SqlConnection> CreateOpenConnectionAsync(CancellationToken cancellationToken = default)
     {
         var connection = new SqlConnection(_connectionString);
@@ -168,12 +169,10 @@ public class SqlConnectionFactory : IDbConnectionFactory
     }
     List<T> IDbConnectionFactory.DeepCopyList<T>(List<T> listToCopy)
     {
-        var serList = new XmlSerializer(typeof(List<T>));
-        using var stringWriter = new StringWriter();
-        serList.Serialize(stringWriter, listToCopy);
-
-        using var stringReader = new StringReader(stringWriter.ToString());
-        return (List<T>)(serList.Deserialize(stringReader)
-            ?? throw new InvalidOperationException("DeepCopyList: deserialization returned a null value."));
+        var json = JsonSerializer.Serialize(listToCopy);
+        return JsonSerializer.Deserialize<List<T>>(json)
+            ?? throw new InvalidOperationException("DeepCopyList: deserialization returned a null value.");
     }
+
+
 }

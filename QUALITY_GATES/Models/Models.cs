@@ -1,5 +1,6 @@
 namespace QUALITY_GATES.Models;
 
+
 // To display top level information in projects like dashboards
 public class PROJECTS_HEADER
 {
@@ -14,7 +15,10 @@ public class PROJECTS_HEADER
     public string BUSINESS_UNIT { get; set; } = string.Empty;
     public string PRODUCT_CATEGORY { get; set; } = string.Empty;
     public string OWNER { get; set; } = string.Empty;
-
+    public string PROJECT_SALES_FORCE_LINK { get; set; } = string.Empty;
+    public DateOnly SOP { get; set; } = DateOnly.MinValue;
+    public DateOnly RELEASED_DATE { get; set; } = DateOnly.MinValue;
+    public int AGEING_DAYS { get; set; } = 0;
     public int PARTS_1Y { get; set; } = 0;
     public int VALUE_1Y_EUR { get; set; } = 0;
     public int PARTS_2Y { get; set; } = 0;
@@ -32,14 +36,14 @@ public class PROJECTS_HEADER
     public int TOTAL_DELIVERABLES_PENDING_ACCOUNTANT { get; set; } = 0;
 }
 
-public class PROJECTS
+public class PROJECT_DETAIL
 {
     public string OPP_ID { get; set; } = string.Empty;
     public string OPP_LINE_ID { get; set; } = string.Empty;
     public string OPP_NAME { get; set; } = string.Empty;
     public string OPP_LINE_NAME { get; set; } = string.Empty;
     public string CURRENT_GATE_ID { get; set; } = string.Empty;
-    public List<PROJECT_GATES> GATES_DONE { get; set; } = new();
+    public List<GATES_ACTIONS> List_Actions { get; set; } = new();
 }
 
 public class PROJECT_GATES
@@ -48,7 +52,7 @@ public class PROJECT_GATES
     public string GATE_NAME { get; set; } = string.Empty;
     public DateTime GATE_TIME_GENERATION { get; set; } = DateTime.UtcNow;
     public DateTime GATE_TIME_CLOSED { get; set; } = DateTime.UtcNow;
-    public List<GATES_ACTIONS> ACTIONS { get; set; } = new();
+    public List<GATES_ACTIONS> List_Actions { get; set; } = new();
 }
 
 public class GATES_ACTIONS
@@ -65,10 +69,10 @@ public class GATES_ACTIONS
     public string ACCOUNTABLE_USER { get; set; } = string.Empty;
     public string SUPPORTING_USER { get; set; } = string.Empty;
     public string INFORMED_USER { get; set; } = string.Empty;
-    public List<DeliverableFile> DeliverableFiles { get; set; } = new();
+    public List<GATES_DELIVERABLES> List_Deliverables { get; set; } = new();
 }
 
-public class DELIVERABLES
+public class GATES_DELIVERABLES
 {
     public int DELIVERABLE_SEQUENCE { get; set; }
     public string DELIVERABLE_DESCRIPTION { get; set; } = string.Empty;
