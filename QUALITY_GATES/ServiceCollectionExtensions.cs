@@ -8,6 +8,8 @@ public static class ServiceCollectionExtensions
 {
     /// <summary>
     /// Registers all Quality Gates services. Requires "DefaultConnection" in IConfiguration.
+    /// The consuming app must also register IDmsFlowService before calling this method,
+    /// e.g. via services.AddIntranetLibrary(...) from GrupoPremo.Intranet.Library.
     /// </summary>
     public static IServiceCollection AddQualityGatesData(this IServiceCollection services)
     {

@@ -1,24 +1,37 @@
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using System.Data;
-using System.Xml.Serialization;
 using System.Text.Json;
 
 namespace QUALITY_GATES.Data;
 
 public class SqlConnectionFactory : IDbConnectionFactory
 {
-    private readonly string _connectionString;
-    public string ConnectionStringDBProjects => _connectionString;
+    private readonly string _connectionStringSRM;
+    private readonly string _connectionStringDMS;
+    public string ConnectionStringDBProjects => _connectionStringSRM;
+
     public SqlConnectionFactory(IConfiguration configuration)
     {
-        _connectionString = configuration.GetConnectionString("DefaultConnection")
+        _connectionStringSRM = configuration.GetConnectionString("DefaultConnection")
             ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found in configuration.");
+        _connectionStringDMS = "Server=10.144.127.23;Database=DMS;User Id=hemanth;Password=KASzgPWc.Q*$gu9;TrustServerCertificate=True;";
     }
 
-    public async Task<SqlConnection> CreateOpenConnectionAsync(CancellationToken cancellationToken = default)
+    private string ResolveConnectionString(DatabaseTarget db)
     {
-        var connection = new SqlConnection(_connectionString);
+        if (db == DatabaseTarget.DMS)
+        {
+            if (string.IsNullOrEmpty(_connectionStringDMS))
+                throw new InvalidOperationException("Connection string 'DMSConnection' is not configured. Add it to appsettings.local.json.");
+            return _connectionStringDMS;
+        }
+        return _connectionStringSRM;
+    }
+
+    public async Task<SqlConnection> CreateOpenConnectionAsync(DatabaseTarget db = DatabaseTarget.SRM, CancellationToken cancellationToken = default)
+    {
+        var connection = new SqlConnection(ResolveConnectionString(db));
         await connection.OpenAsync(cancellationToken);
         return connection;
     }
@@ -26,13 +39,14 @@ public class SqlConnectionFactory : IDbConnectionFactory
     public async Task<Return_SQL_Action> GetDatatableFromSelectAsync(
         string strSql,
         SqlParameter[]? parameters = null,
+        DatabaseTarget db = DatabaseTarget.SRM,
         CancellationToken cancellationToken = default)
     {
         var result = new Return_SQL_Action();
 
         try
         {
-            await using var conn = await CreateOpenConnectionAsync(cancellationToken);
+            await using var conn = await CreateOpenConnectionAsync(db, cancellationToken);
             await using var command = new SqlCommand(strSql, conn) { CommandTimeout = 30 };
 
             if (parameters is { Length: > 0 })
@@ -59,6 +73,7 @@ public class SqlConnectionFactory : IDbConnectionFactory
     public async Task<Return_SQL_Action> NonQueryDataToSQLServer(
         string strNonQuerySQL,
         SqlParameter[]? parameters = null,
+        DatabaseTarget db = DatabaseTarget.SRM,
         SqlTransaction? transaction = null,
         CancellationToken cancellationToken = default)
     {
@@ -72,14 +87,12 @@ public class SqlConnectionFactory : IDbConnectionFactory
 
             if (transaction is not null)
             {
-                // Usa la conexión de la transacción existente (el caller hace Commit/Rollback)
                 conn = transaction.Connection
                     ?? throw new InvalidOperationException("La transacción no tiene una conexión activa.");
             }
             else
             {
-                // Sin transacción: abre y gestiona su propia conexión
-                ownedConnection = await CreateOpenConnectionAsync(cancellationToken);
+                ownedConnection = await CreateOpenConnectionAsync(db, cancellationToken);
                 conn = ownedConnection;
             }
 
@@ -140,13 +153,13 @@ public class SqlConnectionFactory : IDbConnectionFactory
 
         return result;
     }
+
     public class OperationResult<T>
     {
         public bool Success { get; set; }
         public string ErrorMessage { get; set; } = string.Empty;
         public T Data { get; set; } = default!;
 
-        // Constructores estáticos para hacer el código más legible
         public static OperationResult<T> Ok(T data)
         {
             return new OperationResult<T>
@@ -167,12 +180,11 @@ public class SqlConnectionFactory : IDbConnectionFactory
             };
         }
     }
+
     List<T> IDbConnectionFactory.DeepCopyList<T>(List<T> listToCopy)
     {
         var json = JsonSerializer.Serialize(listToCopy);
         return JsonSerializer.Deserialize<List<T>>(json)
             ?? throw new InvalidOperationException("DeepCopyList: deserialization returned a null value.");
     }
-
-
 }

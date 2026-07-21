@@ -60,18 +60,18 @@ public partial class Class_Projects_Quality_Gates
             """;
 
         // First recover all projects pending to process.
-        var queryResult = await _db.GetDatatableFromSelectAsync(sqlProjects, null, cancellationToken);
+        var queryResult = await _db.GetDatatableFromSelectAsync(sqlProjects, null, cancellationToken: cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
         { return queryResult; } // Error generating SQL query 
         if (queryResult.Success & queryResult.RecordsAffected == 0)
         { return queryResult; } // No records to process
         DataTable dtProjects = queryResult.DTResults;
         // Second recover default actions
-        queryResult = await _db.GetDatatableFromSelectAsync(sqlActions, null, cancellationToken);
+        queryResult = await _db.GetDatatableFromSelectAsync(sqlActions, null, cancellationToken: cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
         { return queryResult; }
         DataTable dtActions = queryResult.DTResults;
-        queryResult = await _db.GetDatatableFromSelectAsync(sqlDeliverables, null, cancellationToken);
+        queryResult = await _db.GetDatatableFromSelectAsync(sqlDeliverables, null, cancellationToken: cancellationToken);
         // Third recover default deliverables
         if (!queryResult.Success || queryResult.DTResults == null)
         { return queryResult; }
@@ -92,6 +92,7 @@ public partial class Class_Projects_Quality_Gates
                       new SqlParameter("@OppLineId", rowP["OPPORTUNITY_LINE_ID"]),
                       new SqlParameter("@StatusId", rowA["STATUS_ID"]),
                       new SqlParameter("@SGateId", rowA["SGATE_ID"]),
+                      new SqlParameter("@Sequence",rowA["SEQUENCE"]),
                       new SqlParameter("@GateTarget", rowA["GATE_TARGET"]),
                       new SqlParameter("@User", "System"),
                       new SqlParameter("@PlanStart", DateTime.Now)
@@ -180,6 +181,7 @@ public partial class Class_Projects_Quality_Gates
                           ([OPP_LINE_ID],
                           [STATUS_ID],
                           [SGATE_ID],
+                          GATE_SEQUENCE,
                           [GATE_TYPE],
                           [GATE_STATUS_ID],
                           [GATE_TEXT_EXPLANATION],
@@ -196,6 +198,7 @@ public partial class Class_Projects_Quality_Gates
                           @OppLineId,
                           @StatusId,
                           @SGateId,
+                          @Sequence,
                           'DEFAULT',
                           'NOTSTARTED', 
                           @GateTarget,

@@ -3,26 +3,24 @@ using System.Data;
 
 namespace QUALITY_GATES.Data;
 
+public enum DatabaseTarget { SRM, DMS }
+
 public interface IDbConnectionFactory
 {
-    Task<SqlConnection> CreateOpenConnectionAsync(CancellationToken cancellationToken = default);
+    Task<SqlConnection> CreateOpenConnectionAsync(DatabaseTarget db = DatabaseTarget.SRM, CancellationToken cancellationToken = default);
 
     public string ConnectionStringDBProjects { get; }
+
     Task<Return_SQL_Action> GetDatatableFromSelectAsync(
         string strSql,
         SqlParameter[]? parameters = null,
+        DatabaseTarget db = DatabaseTarget.SRM,
         CancellationToken cancellationToken = default);
-    /// <summary>
-    /// Executes a non-query SQL command (INSERT, UPDATE, DELETE) against the SQL Server database, within a given transaction      
-    /// </summary>
-    /// <param name="strNonQuerySQL">SQL with transaction to execute</param>
-    /// <param name="parameters">List of parameters if provided</param>
-    /// <param name="transaction">Transaction from callet function</param>
-    /// <param name="cancellationToken">Token for cancelling sql</param>
-    /// <returns>Return SQL Action object</returns>
+
     Task<Return_SQL_Action> NonQueryDataToSQLServer(
         string strNonQuerySQL,
         SqlParameter[]? parameters = null,
+        DatabaseTarget db = DatabaseTarget.SRM,
         SqlTransaction? transaction = null,
         CancellationToken cancellationToken = default);
 
@@ -42,4 +40,3 @@ public class Return_SQL_Action
     public int RecordsAffected { get; set; } = 0;
     public DataTable? DTResults { get; set; } = null;
 }
-

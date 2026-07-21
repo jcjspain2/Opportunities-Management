@@ -43,6 +43,7 @@ public class PROJECT_DETAIL
     public string OPP_NAME { get; set; } = string.Empty;
     public string OPP_LINE_NAME { get; set; } = string.Empty;
     public string CURRENT_GATE_ID { get; set; } = string.Empty;
+    public string PATH_TO_SAVE_FILES { get; set; } = string.Empty;
     public List<GATES_ACTIONS> List_Actions { get; set; } = new();
 }
 
@@ -57,36 +58,93 @@ public class PROJECT_GATES
 
 public class GATES_ACTIONS
 {
-    public string ACTION_ID { get; set; } = string.Empty;
-    public int ACTION_SEQUENCE { get; set; }
-    public string ACTION_TARGET { get; set; } = string.Empty;
-    public string ACTION_GENERATION_TYPE { get; set; } = string.Empty;
-    public string RESPONSIBLE_JOB_DESCRIPTION { get; set; } = string.Empty;
-    public string ACCOUNTABLE_JOB_DESCRIPTION { get; set; } = string.Empty;
-    public string SUPPORTING_JOB_DESCRIPTION { get; set; } = string.Empty;
-    public string INFORMED_JOB_DESCRIPTION { get; set; } = string.Empty;
-    public string RESPONSIBLE_USER { get; set; } = string.Empty;
-    public string ACCOUNTABLE_USER { get; set; } = string.Empty;
-    public string SUPPORTING_USER { get; set; } = string.Empty;
-    public string INFORMED_USER { get; set; } = string.Empty;
-    public List<GATES_DELIVERABLES> List_Deliverables { get; set; } = new();
-}
+    public string STATUS_ID { get; set; } = string.Empty; // FEAS
+    public string ACTION_ID { get; set; } = string.Empty; // FEAS_1
+    public int ACTION_SEQUENCE { get; set; }              // For sorting actions in the gate
+    public string ACTION_TARGET { get; set; } = string.Empty; // Text containing the target of the action
+    public string ACTION_GENERATION_TYPE { get; set; } = string.Empty; // DEFAULT, MANUAL
 
+    public DateOnly PLANNED_START_DATE { get; set; } = DateOnly.MinValue;
+    public DateOnly PLANNED_END_DATE { get; set; } = DateOnly.MinValue;
+    public DateOnly ACTUAL_START_DATE { get; set; } = DateOnly.MinValue;
+    public DateOnly ACTUAL_END_DATE { get; set; } = DateOnly.MinValue;
+    public List<GATES_DELIVERABLES> List_Deliverables { get; set; } = new();
+
+}
 public class GATES_DELIVERABLES
 {
     public int DELIVERABLE_SEQUENCE { get; set; }
     public string DELIVERABLE_DESCRIPTION { get; set; } = string.Empty;
-    public string DELIVERABLE_TYPE_GENERATION { get; set; } = string.Empty;
+    public string DELIVERABLE_TYPE_GENERATION { get; set; } = string.Empty; // DEFAULT, MANUAL
     public string DELIVERABLE_ACCEPTANCE_CRITERIA { get; set; } = string.Empty;
-    public string DELIVERABLE_TYPE { get; set; } = string.Empty;
-    public List<DeliverableFile> DeliverableFiles { get; set; } = new();
+    public string DELIVERABLE_TYPE { get; set; } = string.Empty; // FILE or TEXT
+    // CURRENT STATUS OF DELIVERABLE
+    public string DELIVERABLE_STATUS_ID { get; set; } = string.Empty;
+    public string ACCOUNTED_STATUS_ID { get; set; } = string.Empty;
+
+    public string DELIVERABLE_STATUS_DESCRIPTION { get; set; } = string.Empty;
+    public string ACCOUNTED_STATUS_DESCRIPTION { get; set; } = string.Empty;
+    public bool IS_DELIVERABLE_RESPONSIBLE_FINISH { get; set; } = false;
+    public bool IS_DELIVERABLE_ACCOUNTED_FINISH { get; set; } = false;
+    // JOBS ID RESPONSIBLES & ACCOUNBTANTS
+    public string RESPONSIBLE_JOB_ID { get; set; } = string.Empty;
+    public string RESPONSIBLE_JOB_NAME { get; set; } = string.Empty;
+    public string ACCOUNTABLE_JOB_ID { get; set; } = string.Empty;
+    public string ACCOUNTABLE_JOB_NAME { get; set; } = string.Empty;
+    // USERS ID RESPONSIBLES & ACCOUNTANTS
+
+    public string RESPONSIBLE_USER_ID { get; set; } = string.Empty;
+    public string RESPONSIBLE_USER_NAME { get; set; } = string.Empty;
+    public string ACCOUNTABLE_USER_ID { get; set; } = string.Empty;
+    public string ACCOUNTABLE_USER_NAME { get; set; } = string.Empty;
+
+    // DATES MANAGEMENT
+    public DateOnly PLANNED_START_DATE { get; set; } = DateOnly.MinValue;
+    public DateOnly PLANNED_END_DATE { get; set; } = DateOnly.MinValue;
+    public DateOnly ACTUAL_START_DATE { get; set; } = DateOnly.MinValue;
+    public DateOnly ACTUAL_END_DATE { get; set; } = DateOnly.MinValue;
+    public DateOnly USER_START_DATE { get; set; } = DateOnly.MinValue;
+    public DateOnly USER_END_DATE { get; set; } = DateOnly.MinValue;
+
+
+
+
+
+
+    public List<DELIVERABLE_FILE> DeliverableFiles { get; set; } = new();
+    public List<DELIVERABLES_COMMENTS> DeliverableComments { get; set; } = new();
+
+}
+public class DELIVERABLES_COMMENTS
+{
+    public Guid Id { get; set; }
+    public string COMMENT_TEXT { get; set; } = string.Empty;
+    public string USER { get; set; } = string.Empty;
+    public DateTime COMMENT_DATE { get; set; } = DateTime.MinValue;
 }
 
-public class DeliverableFile
+public class DELIVERABLE_FILE
 {
     public int Id { get; set; }
     public string FileName { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;
     public string FileType { get; set; } = string.Empty;
+    public string UserUpload { get; set; } = string.Empty;
     public DateTime UploadDate { get; set; }
+    
+}
+internal class DELIVERABLE_FILE_FROM_DMS
+{
+    public string OppLineId { get; set; }=string.Empty;
+    public string Gate_Id { get; set; } = string.Empty;
+    public string StatusiD { get; set; } = string.Empty;
+    public int DeliverableID { get; set; } = 0;
+
+    public int Id { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string FilePath { get; set; } = string.Empty;
+    public string FileType { get; set; } = string.Empty;
+    public string UserUpload { get; set; } = string.Empty;
+    public DateTime UploadDate { get; set; }
+
 }

@@ -35,5 +35,18 @@ namespace QUALITY_GATES.Tools
                 ? DateOnly.MinValue
                 : DateOnly.FromDateTime(Convert.ToDateTime(row[column]));
         }
+
+        public static DateTime GetDateTime(DataRow row, string column)
+        {
+            return row[column] == DBNull.Value || row[column] == null
+                ? DateTime.MinValue
+                : Convert.ToDateTime(row[column]);
+        }
+        public static bool GetBoolean(DataRow row, string column)
+        {
+            return row[column] == DBNull.Value || row[column] == null
+                ? false
+                : Convert.ToBoolean(row[column]);
+        }
     }
 }
