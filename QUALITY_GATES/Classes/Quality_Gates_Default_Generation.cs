@@ -19,7 +19,7 @@ public partial class Class_Projects_Quality_Gates
                 OPPORTUNITY_NAME,
                 OPPORTUNITY_LNE_NAME
             FROM [dbo].[TRA_PROJECTS]
-            WHERE IsGeneratedFeasibility = 0
+            WHERE IsGeneratedInitial = 0
             """;
         const string sqlActions = """
             SELECT MODULE_ID,
@@ -36,7 +36,7 @@ public partial class Class_Projects_Quality_Gates
                    PROCESS_DAYS,
                    IsDeleted
             FROM dbo.MAS_ACTIONS
-            WHERE STATUS_ID = 'FEAS'  AND (IsDeleted IS NULL OR IsDeleted = 0)
+            WHERE STATUS_ID = @GateID  AND (IsDeleted IS NULL OR IsDeleted = 0)
             """;
         const string sqlDeliverables = """
             SELECT MODULE_ID,
@@ -56,7 +56,7 @@ public partial class Class_Projects_Quality_Gates
                    SUPORTING_JOB_TITLE,
                    IsDeleted
             FROM dbo.MAS_DELIVERABLES
-            WHERE STATUS_ID='FEAS'  AND (IsDeleted IS NULL OR IsDeleted = 0)         
+            WHERE STATUS_ID= @GateID  AND (IsDeleted IS NULL OR IsDeleted = 0)         
             """;
 
         // First recover all projects pending to process.
@@ -67,11 +67,15 @@ public partial class Class_Projects_Quality_Gates
         { return queryResult; } // No records to process
         DataTable dtProjects = queryResult.DTResults;
         // Second recover default actions
-        queryResult = await _db.GetDatatableFromSelectAsync(sqlActions, null, cancellationToken: cancellationToken);
+        var parametersActGate = new[]
+                   {new SqlParameter("@GateID", GateID) };
+        queryResult = await _db.GetDatatableFromSelectAsync(sqlActions, parametersActGate, cancellationToken: cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
         { return queryResult; }
         DataTable dtActions = queryResult.DTResults;
-        queryResult = await _db.GetDatatableFromSelectAsync(sqlDeliverables, null, cancellationToken: cancellationToken);
+        var parametersDelGate = new[]
+                  {new SqlParameter("@GateID", GateID) };
+        queryResult = await _db.GetDatatableFromSelectAsync(sqlDeliverables, parametersDelGate, cancellationToken: cancellationToken);
         // Third recover default deliverables
         if (!queryResult.Success || queryResult.DTResults == null)
         { return queryResult; }
@@ -169,7 +173,7 @@ public partial class Class_Projects_Quality_Gates
     private string GetUpdateProjectAsFeasiilityGenerated()
     {
         return $@" UPDATE [SRM].[dbo].[TRA_PROJECTS]
-                          SET IsGeneratedFeasibility = 1,
+                          SET IsGeneratedInitial = 1,
                               CURRENT_QG_STATUS=@Current_Status,
                               RELEASED_DATE= GETDATE()
                      WHERE  OPPORTUNITY_LINE_ID= @Project_Id  ";
