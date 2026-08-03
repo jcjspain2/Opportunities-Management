@@ -8,6 +8,7 @@ public partial class Class_Projects_Quality_Gates
 {
     private readonly IDbConnectionFactory _db;
     private readonly IDmsFlowService? _dms;
+    private const string MODULE_ID = "Q_GATES";
 
     public Class_Projects_Quality_Gates(IDbConnectionFactory db, IServiceProvider serviceProvider)
     {

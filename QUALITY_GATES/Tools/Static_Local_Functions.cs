@@ -8,7 +8,8 @@ using System.Threading.Tasks;
 namespace QUALITY_GATES.Tools
 {
     internal class Static_Local_Functions
-    {
+     {
+
         public static string GetString(DataRow row, string column)
         {
             return row[column] == DBNull.Value || row[column] == null

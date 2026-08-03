@@ -6,6 +6,7 @@ public class PROJECTS_HEADER
 {
     public string OPP_ID { get; set; } = string.Empty;
     public string OPP_LINE_ID { get; set; } = string.Empty;
+    public Priority OPP_LINE_PRIORITY { get; set; } = Priority.Normal;
     public string OPP_NAME { get; set; } = string.Empty;
     public string OPP_LINE_NAME { get; set; } = string.Empty;
     public string CUST_NAME { get; set; } = string.Empty;
@@ -28,12 +29,11 @@ public class PROJECTS_HEADER
     public int PARTS_4Y { get; set; } = 0;
     public int VALUE_4Y_EUR { get; set; } = 0;
     public int VALUE_TOTAL_ALL_EUR { get; set; } = 0;
-
-
-    public string CURRENT_GATE_ID { get; set; } = string.Empty;
+     public string CURRENT_GATE_ID { get; set; } = string.Empty;
     public int TOTAL_DELIVERABLES { get; set; } = 0;
     public int TOTAL_DELIVERABLES_PENDING_OWNER { get; set; } = 0;
     public int TOTAL_DELIVERABLES_PENDING_ACCOUNTANT { get; set; } = 0;
+    public List<PROJECT_STATUS> List_Project_Status { get; set; } = new();
 }
 
 public class PROJECT_DETAIL
@@ -47,13 +47,19 @@ public class PROJECT_DETAIL
     public List<GATES_ACTIONS> List_Actions { get; set; } = new();
 }
 
-public class PROJECT_GATES
+public class PROJECT_STATUS
 {
-    public string GATE_ID { get; set; } = string.Empty;
-    public string GATE_NAME { get; set; } = string.Empty;
+    public string GATE_STATUS_ID { get; set; } = string.Empty;
+    public bool GATE_GENERATED { get; set; } = false;
+    public bool GATE_CLOSED { get; set; } = false;
+    public string GATE_STATUS_DESCRIPTION { get; set; } = string.Empty; // Descripcion del estado FEAS PCA
     public DateTime GATE_TIME_GENERATION { get; set; } = DateTime.UtcNow;
+    public string GENERATION_USER_ID { get; set; }=string.Empty;
+    public String CURRENT_STATUS_ID { get; set; }= string.Empty;
+    public String CURRENT_STATUS_DESCRIPTION_ID { get; set; }=String.Empty;
     public DateTime GATE_TIME_CLOSED { get; set; } = DateTime.UtcNow;
-    public List<GATES_ACTIONS> List_Actions { get; set; } = new();
+    public int TIMES_REOPENED { get; set; } = 0;
+    public string CLOSING_USER_ID { get; set; } = string.Empty;
 }
 
 public class GATES_ACTIONS
@@ -72,7 +78,11 @@ public class GATES_ACTIONS
 
 }
 public class GATES_DELIVERABLES
+
 {
+    public string OPP_LINE_ID { get; set; } = string.Empty;
+    public string STATUS_ID { get; set; } = string.Empty; // FEAS
+    public string ACTION_ID { get; set; } = string.Empty; // FEAS_1
     public int DELIVERABLE_SEQUENCE { get; set; }
     public string DELIVERABLE_DESCRIPTION { get; set; } = string.Empty;
     public string DELIVERABLE_TYPE_GENERATION { get; set; } = string.Empty; // DEFAULT, MANUAL
@@ -106,6 +116,10 @@ public class GATES_DELIVERABLES
     public DateOnly USER_START_DATE { get; set; } = DateOnly.MinValue;
     public DateOnly USER_END_DATE { get; set; } = DateOnly.MinValue;
 
+    // Links to patterns & explanation pages for users Open
+    public string LINK_TO_TEMPLATE { get; set; } = string.Empty;
+    public string LINK_TO_INSTRUCTION_TO_FOLLOW { get; set; } = string.Empty;
+    public string DELIVERABLE_USER_TEXT { get; set; } = string.Empty;
 
 
 
@@ -117,6 +131,10 @@ public class GATES_DELIVERABLES
 }
 public class DELIVERABLES_COMMENTS
 {
+    public string OppLineId { get; set; } = string.Empty;
+    public string Gate_Id { get; set; } = string.Empty;
+    public string StatusiD { get; set; } = string.Empty;
+    public int DeliverableID { get; set; } = 0;
     public Guid Id { get; set; }
     public string COMMENT_TEXT { get; set; } = string.Empty;
     public string USER { get; set; } = string.Empty;
@@ -125,13 +143,24 @@ public class DELIVERABLES_COMMENTS
 
 public class DELIVERABLE_FILE
 {
-    public int Id { get; set; }
+    public string OppLineId { get; set; } = string.Empty;
+    public string Gate_Id { get; set; } = string.Empty;
+    public string StatusiD { get; set; } = string.Empty;
+    public int DeliverableID { get; set; } = 0;
+
+    public int Id_Trans { get; set; } = 0;
+    public int Id_File { get; set; } = 0;
     public string FileName { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;
     public string FileType { get; set; } = string.Empty;
     public string UserUpload { get; set; } = string.Empty;
     public DateTime UploadDate { get; set; }
-    
+    // Metadata From system
+    public string METADATA_OS_User_Creation { get; set; } = string.Empty;
+    public string METADATA_OS_User_Modification { get; set; } = string.Empty;
+    public DateTime METADADATA_OS_Creation_Date { get; set; } = DateTime.MinValue;
+    public DateTime METADADATA_OS_Modification_Date { get; set; } = DateTime.MinValue;
+
 }
 internal class DELIVERABLE_FILE_FROM_DMS
 {
@@ -140,11 +169,45 @@ internal class DELIVERABLE_FILE_FROM_DMS
     public string StatusiD { get; set; } = string.Empty;
     public int DeliverableID { get; set; } = 0;
 
-    public int Id { get; set; }
+    public int Id_Trans { get; set; } = 0;
+    public int Id_File { get; set; } = 0;
     public string FileName { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;
     public string FileType { get; set; } = string.Empty;
     public string UserUpload { get; set; } = string.Empty;
-    public DateTime UploadDate { get; set; }
+    public DateTime UploadDate { get; set; } = DateTime.MinValue;
+    public string METADATA_User_Creation { get; set; } = string.Empty;
+    public string METADATA_User_Modification { get; set; } = string.Empty;
+    public DateTime METADADATA_Creation_Date { get; set; } = DateTime.MinValue;
+    public DateTime METADADATA_Modification_Date { get; set; } = DateTime.MinValue;
+}
+public class USERS_DETAILS
+{
+    public string UserId { get; set; } = string.Empty;
+    public string User_Display_Name { get; set; } = string.Empty;
+    public string User_Q_GATES_Job_Title { get; set; } = string.Empty;
+    public string User_Q_GATES_Job_Title_ID { get; set; } = string.Empty;
+    public string User_Cadena_JobTitle { get; set; } = string.Empty;
+    public string UserSite { get; set; } = string.Empty;
+    public string UserManager_Mail { get; set; } = string.Empty;
+    public string UserManager_Functional_Mail { get; set; } = string.Empty;
 
+}
+public enum Priority
+{
+    High = 1,
+    Medium = 2,
+    Normal = 3,
+    Low = 4
+}
+public static class PriorityExtensions
+{
+    public static Priority FromValue(int value)
+    {
+        if (Enum.IsDefined(typeof(Priority), value))
+        {
+            return (Priority)value;
+        }
+        throw new ArgumentException($"Valor de prioridad no válido: {value}");
+    }
 }
