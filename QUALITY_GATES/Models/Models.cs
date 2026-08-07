@@ -57,9 +57,16 @@ public class PROJECT_STATUS
     public string GENERATION_USER_ID { get; set; }=string.Empty;
     public String CURRENT_STATUS_ID { get; set; }= string.Empty;
     public String CURRENT_STATUS_DESCRIPTION_ID { get; set; }=String.Empty;
+    public bool IS_CURRENT_STATUS_FINAL { get; set; } = false;
+    public bool IS_CURRENT_STATUS_INITIAL { get; set; } = false;
+    public bool IS_CURRENT_STATUS_IN_PROGRESS { get; set; } = false;
     public DateTime GATE_TIME_CLOSED { get; set; } = DateTime.UtcNow;
     public int TIMES_REOPENED { get; set; } = 0;
     public string CLOSING_USER_ID { get; set; } = string.Empty;
+    public int TOTAL_DELIVERABLES { get; set; } = 0;
+    public int TOTAL_DELIVERABLES_PENDING_OWNER { get; set; } = 0;
+    public int TOTAL_DELIVERABLES_PENDING_ACCOUNTANT { get; set; } = 0;
+    
 }
 
 public class GATES_ACTIONS
@@ -200,6 +207,13 @@ public enum Priority
     Normal = 3,
     Low = 4
 }
+
+public enum DeliverableRolesEstructure
+{
+    Responsible = 1,
+    Accountable = 2
+}
+
 public static class PriorityExtensions
 {
     public static Priority FromValue(int value)

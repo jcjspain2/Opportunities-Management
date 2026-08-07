@@ -117,15 +117,27 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                     VALUE_TOTAL_ALL_EUR = Convert.ToInt32((GetInt(row, "PIECES_1Y") * TargetPrice)) + Convert.ToInt32((GetInt(row, "PIECES_2Y") * TargetPrice)) + Convert.ToInt32((GetInt(row, "PIECES_3Y") * TargetPrice)) + Convert.ToInt32((GetInt(row, "PIECES_4Y") * TargetPrice))
                 };
                 // From here we have to recover Gate Status Availables for each project and add it currentprojectList
-                const string sqlNextGate = """
-                              SELECT T1.STATUS_ID,STATUS_DESCRIPTION,STATUS_SEQUENCE,T2.STATUS_ID,ISNULL(CURRENT_STATUS,'NO_GEN') AS CURRENT_STATUS ,T2.GENERATION_DATE,T2.GENERATION_USER,T2.TIMES_REOPENED, 
-                                     ISNULL(T3.GATE_STATUS_DESC,'No Generated') AS CURSTATUS_DESC,[CLOSING_DATE],[CLOSING_USER]
-                              FROM [SRM].[dbo].[MAS_STATUS] T1
-                              LEFT JOIN  [SRM].[dbo].[TRA_PROJECTS_STATUS] T2 ON  T2.MODULE_ID=T1.STATUS_MODULE AND T1.STATUS_ID=T2.STATUS_ID AND T2.OPP_LINE_ID=@OppLineId
-                              LEFT JOIN [SRM].[dbo].MAS_GATE_STATUS T3 ON T3.MODULE_ID= @ModuleId AND T3.KEY_PROCESS='GATE_ST' AND T3.GATE_STATUS_ID=T2.CURRENT_STATUS
-                              WHERE T1.STATUS_MODULE=@ModuleId AND T1.IsDeleted=0
-                              ORDER BY T1.STATUS_SEQUENCE
-                              """;
+                const string sqlNextGate = @"SELECT T1.STATUS_ID,STATUS_DESCRIPTION,STATUS_SEQUENCE,T2.STATUS_ID,ISNULL(CURRENT_STATUS,
+                                                    'NO_GEN')AS CURRENT_STATUS ,T2.GENERATION_DATE,T2.GENERATION_USER,T2.TIMES_REOPENED, 
+                                                       ISNULL(T3.GATE_STATUS_DESC,'No Generated') AS CURSTATUS_DESC,[CLOSING_DATE],[CLOSING_USER],
+                                                       T3.IS_FINAL_STATE,T3.IS_PENDING_REVIEW,T3.IS_INITIAL_STATE,T3.IS_IN_PROGRESS,
+                                                       SUM (CASE WHEN T3.GATE_STATUS_DESC IS NULL THEN 0 ELSE 1 END )AS #_DELIVERABLES,
+                                                       ((SUM (CASE WHEN T3.GATE_STATUS_DESC IS NULL THEN 0 ELSE 1 END )) - 
+                                                         SUM(CASE T5.IS_FINAL_STATE WHEN 1 THEN 1 ELSE 0 END))PENDING_RESPONSIBLE,
+                                                       ((SUM (CASE WHEN T3.GATE_STATUS_DESC IS NULL THEN 0 ELSE 1 END ))  - 
+                                                        SUM(CASE T6.IS_FINAL_STATE WHEN 1 THEN 1 ELSE 0 END))PENDING_ACCOUNTANT
+                                             FROM [SRM].[dbo].[MAS_STATUS] T1
+                                             LEFT JOIN  [SRM].[dbo].[TRA_PROJECTS_STATUS] T2 ON  T2.MODULE_ID=T1.STATUS_MODULE AND T1.STATUS_ID=T2.STATUS_ID AND T2.OPP_LINE_ID=@OppLineId
+                                             LEFT JOIN [SRM].[dbo].MAS_GATE_STATUS T3 ON T3.MODULE_ID= 'Q_GATES'  AND T3.KEY_PROCESS='GATE_ST' AND T3.GATE_STATUS_ID=T2.CURRENT_STATUS
+                                             LEFT JOIN dbo.TRA_PROJECTS_DELIVERABLES T4 ON T4.OPP_LINE_ID=@OppLineId AND T4.STATUS_ID=T1.STATUS_ID
+                                             LEFT JOIN dbo.MAS_GATE_STATUS T5 ON T5.GATE_STATUS_ID=T4.DELIVERABLE_STATUS_ID AND T5.MODULE_ID='Q_GATES' AND T5.KEY_PROCESS='DEL_RESP'
+                                             LEFT JOIN dbo.MAS_GATE_STATUS T6 ON T6.GATE_STATUS_ID=T4.ACCOUNTABLE_STATUS_ID AND T6.MODULE_ID='Q_GATES' AND T6.KEY_PROCESS='DEL_ACC'   
+                                             WHERE T1.STATUS_MODULE='Q_GATES' AND T1.IsDeleted=0
+                                             GROUP BY T1.STATUS_ID,STATUS_DESCRIPTION,STATUS_SEQUENCE,T2.STATUS_ID,ISNULL(CURRENT_STATUS,'NO_GEN')
+                                                   ,T2.GENERATION_DATE,T2.GENERATION_USER,T2.TIMES_REOPENED, 
+                                                   ISNULL(T3.GATE_STATUS_DESC,'No Generated') ,[CLOSING_DATE],[CLOSING_USER],
+                                                   T3.IS_FINAL_STATE,T3.IS_PENDING_REVIEW,T3.IS_INITIAL_STATE,T3.IS_IN_PROGRESS
+                                             ORDER BY T1.STATUS_SEQUENCE";
 
       
                 var parametersNextGate = new[]
@@ -150,8 +162,13 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                             CLOSING_USER_ID = GetString(rowSt, "CLOSING_USER"),
                             TIMES_REOPENED = GetInt(rowSt ,"TIMES_REOPENED"),
                             GATE_GENERATED = rowSt["GENERATION_DATE"] != DBNull.Value && rowSt["GENERATION_DATE"] != null,
-                            GATE_CLOSED= rowSt["CLOSING_DATE"] != DBNull.Value && rowSt["CLOSING_DATE"] != null
-                            
+                            GATE_CLOSED= rowSt["CLOSING_DATE"] != DBNull.Value && rowSt["CLOSING_DATE"] != null,
+                            IS_CURRENT_STATUS_FINAL = GetBoolean(rowSt, "IS_FINAL_STATE"),
+                            IS_CURRENT_STATUS_INITIAL = GetBoolean(rowSt, "IS_INITIAL_STATE"),
+                            IS_CURRENT_STATUS_IN_PROGRESS = GetBoolean(rowSt, "IS_IN_PROGRESS"),
+                            TOTAL_DELIVERABLES = GetInt(rowSt, "#_DELIVERABLES"),
+                            TOTAL_DELIVERABLES_PENDING_ACCOUNTANT = GetInt(rowSt, "PENDING_ACCOUNTANT"),
+                            TOTAL_DELIVERABLES_PENDING_OWNER = GetInt(rowSt, "PENDING_RESPONSIBLE")
                         };
                        project.List_Project_Status.Add( CurStatus );
                     }
@@ -426,7 +443,8 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                         DELIVERABLE_STATUS_DESCRIPTION  = GetString(rowDel, "DEL_STATUS_DESC"),
                         IS_DELIVERABLE_RESPONSIBLE_FINISH = GetBoolean(rowDel, "RESP_STATUS_iSFINAL"),
                         IS_DELIVERABLE_ACCOUNTED_FINISH = GetBoolean(rowDel, "ACC_STATUS_iSFINAL"),
-                        ACCOUNTED_STATUS_ID             = GetString(rowDel, "ACC_STATUS_DESC"),
+                        ACCOUNTED_STATUS_ID             = GetString(rowDel, "ACCOUNTABLE_STATUS_ID"),
+                        ACCOUNTED_STATUS_DESCRIPTION    = GetString(rowDel, "ACC_STATUS_DESC"),
                         DELIVERABLE_TYPE                = GetString(rowDel, "DELIVERABLE_CREATION_TYPE"),
                         PLANNED_START_DATE              = GetDateOnly(rowDel, "PLANNED_START_DATE"),
                         PLANNED_END_DATE                = GetDateOnly(rowDel, "PLANNED_END_DATE"),
@@ -497,7 +515,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                C.COMMENT_BY,
                C.COMMENT_DATE
         FROM  dbo.TRA_PROJECTS_DELIVERABLE_COMMENTS C
-        WHERE C.OPP_LINE_ID =@OppLineId  AND C.STATUS_ID = @GateId
+        WHERE C.OPP_LINE_ID =@OppLineId  AND C.STATUS_ID = @GateId AND KEY_PROCESS='DELIV'
         ORDER BY C.SGATE_ID, C.DEL_ID, C.COMMENT_DATE ASC";
     private static string SQL_Projects_Deliverable_Comments_Per_Deliverable() => @"
          SELECT C.OPP_LINE_ID,
@@ -509,7 +527,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                C.COMMENT_BY,
                C.COMMENT_DATE
         FROM  dbo.TRA_PROJECTS_DELIVERABLE_COMMENTS C
-        WHERE C.OPP_LINE_ID =@OppLineId  AND C.STATUS_ID = @GateId AND C.SGATE_ID= @StatusId AND C.DEL_ID=@DelivID
+        WHERE C.OPP_LINE_ID =@OppLineId  AND C.STATUS_ID = @GateId AND C.SGATE_ID= @StatusId AND C.DEL_ID=@DelivID AND KEY_PROCESS='DELIV'
         ORDER BY C.SGATE_ID, C.DEL_ID, C.COMMENT_DATE ASC";
 
 }
