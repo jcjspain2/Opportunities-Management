@@ -229,6 +229,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                ,T6.SAMPLE_LINK
                ,T6.INSTRUCTION_LINK
                ,T1.USER_TEXT
+               ,T1.PATH_TO_SAVE
      FROM  [dbo].[TRA_PROJECTS_DELIVERABLES] T1
      LEFT JOIN dbo.MAS_JOB_TITLES T2 ON T2.JOB_TITLE_ID=T1.RESPONSIBLE_JOB_ID
      LEFT JOIN dbo.MAS_JOB_TITLES T3 ON T3.JOB_TITLE_ID=T1.ACCOUNTABLE_JOB_ID
@@ -433,38 +434,39 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                     curListDeliverable.Add(new GATES_DELIVERABLES
                     {
                         OPP_LINE_ID = Opp_Line_ID,
-                        STATUS_ID= Gate_Id,// FEAS
+                        STATUS_ID = Gate_Id,// FEAS
                         ACTION_ID = curAction.ACTION_ID, // FEAS_1
-                        DELIVERABLE_SEQUENCE            = delivId,
-                        DELIVERABLE_DESCRIPTION         = GetString(rowDel, "DELIVERABLE_NAME"),
-                        DELIVERABLE_TYPE_GENERATION     = GetString(rowDel, "DELIVERABLE_CREATION_TYPE"),
+                        DELIVERABLE_SEQUENCE = delivId,
+                        DELIVERABLE_DESCRIPTION = GetString(rowDel, "DELIVERABLE_NAME"),
+                        DELIVERABLE_TYPE_GENERATION = GetString(rowDel, "DELIVERABLE_CREATION_TYPE"),
                         DELIVERABLE_ACCEPTANCE_CRITERIA = GetString(rowDel, "DELIVERABLE_ACEPTANCE_CRITERIA"),
-                        DELIVERABLE_STATUS_ID           = GetString(rowDel, "DELIVERABLE_STATUS_ID"),
-                        DELIVERABLE_STATUS_DESCRIPTION  = GetString(rowDel, "DEL_STATUS_DESC"),
+                        DELIVERABLE_STATUS_ID = GetString(rowDel, "DELIVERABLE_STATUS_ID"),
+                        PATH_TO_SAVE_FILES = GetString(rowDel, "PATH_TO_SAVE"),
+                        DELIVERABLE_STATUS_DESCRIPTION = GetString(rowDel, "DEL_STATUS_DESC"),
                         IS_DELIVERABLE_RESPONSIBLE_FINISH = GetBoolean(rowDel, "RESP_STATUS_iSFINAL"),
                         IS_DELIVERABLE_ACCOUNTED_FINISH = GetBoolean(rowDel, "ACC_STATUS_iSFINAL"),
-                        ACCOUNTED_STATUS_ID             = GetString(rowDel, "ACCOUNTABLE_STATUS_ID"),
-                        ACCOUNTED_STATUS_DESCRIPTION    = GetString(rowDel, "ACC_STATUS_DESC"),
-                        DELIVERABLE_TYPE                = GetString(rowDel, "DELIVERABLE_CREATION_TYPE"),
-                        PLANNED_START_DATE              = GetDateOnly(rowDel, "PLANNED_START_DATE"),
-                        PLANNED_END_DATE                = GetDateOnly(rowDel, "PLANNED_END_DATE"),
-                        ACTUAL_START_DATE               = GetDateOnly(rowDel, "ACTUAL_START_DATE"),
-                        ACTUAL_END_DATE                 = GetDateOnly(rowDel, "ACTUAL_END_DATE"),
-                        USER_START_DATE                 = GetDateOnly(rowDel, "USER_START_DATE"),
-                        USER_END_DATE                   = GetDateOnly(rowDel, "USER_FINISH_DATE"),
-                        ACCOUNTABLE_JOB_ID               = GetString(rowDel, "ACCOUNTABLE_JOB_ID"),
-                        ACCOUNTABLE_JOB_NAME             = GetString(rowDel, "ACC_DESCR"),
-                        RESPONSIBLE_JOB_ID               = GetString(rowDel, "RESPONSIBLE_JOB_ID"),
-                        RESPONSIBLE_JOB_NAME             = GetString(rowDel, "RESP_DESCR"),
-                        RESPONSIBLE_USER_ID              = GetString(rowDel, "RESPONSIBLE_USER_ID"),
-                        RESPONSIBLE_USER_NAME            = String.Empty,  // We need to implement this
-                        ACCOUNTABLE_USER_ID              = GetString(rowDel, "ACCOUNTABLE_USER_ID"),
-                        ACCOUNTABLE_USER_NAME            = String.Empty,  // We need to implement this
-                        LINK_TO_TEMPLATE                 = GetString(rowDel, "SAMPLE_LINK"),
-                        LINK_TO_INSTRUCTION_TO_FOLLOW    = GetString(rowDel, "INSTRUCTION_LINK"),
-                        DELIVERABLE_USER_TEXT            = GetString(rowDel, "USER_TEXT"),
-                        DeliverableComments              = delivComments,
-                        DeliverableFiles                 = ListFiles
+                        ACCOUNTED_STATUS_ID = GetString(rowDel, "ACCOUNTABLE_STATUS_ID"),
+                        ACCOUNTED_STATUS_DESCRIPTION = GetString(rowDel, "ACC_STATUS_DESC"),
+                        DELIVERABLE_TYPE = GetString(rowDel, "DELIVERABLE_CREATION_TYPE"),
+                        PLANNED_START_DATE = GetDateOnly(rowDel, "PLANNED_START_DATE"),
+                        PLANNED_END_DATE = GetDateOnly(rowDel, "PLANNED_END_DATE"),
+                        ACTUAL_START_DATE = GetDateOnly(rowDel, "ACTUAL_START_DATE"),
+                        ACTUAL_END_DATE = GetDateOnly(rowDel, "ACTUAL_END_DATE"),
+                        USER_START_DATE = GetDateOnly(rowDel, "USER_START_DATE"),
+                        USER_END_DATE = GetDateOnly(rowDel, "USER_FINISH_DATE"),
+                        ACCOUNTABLE_JOB_ID = GetString(rowDel, "ACCOUNTABLE_JOB_ID"),
+                        ACCOUNTABLE_JOB_NAME = GetString(rowDel, "ACC_DESCR"),
+                        RESPONSIBLE_JOB_ID = GetString(rowDel, "RESPONSIBLE_JOB_ID"),
+                        RESPONSIBLE_JOB_NAME = GetString(rowDel, "RESP_DESCR"),
+                        RESPONSIBLE_USER_ID = GetString(rowDel, "RESPONSIBLE_USER_ID"),
+                        RESPONSIBLE_USER_NAME = String.Empty,  // We need to implement this
+                        ACCOUNTABLE_USER_ID = GetString(rowDel, "ACCOUNTABLE_USER_ID"),
+                        ACCOUNTABLE_USER_NAME = String.Empty,  // We need to implement this
+                        LINK_TO_TEMPLATE = GetString(rowDel, "SAMPLE_LINK"),
+                        LINK_TO_INSTRUCTION_TO_FOLLOW = GetString(rowDel, "INSTRUCTION_LINK"),
+                        DELIVERABLE_USER_TEXT = GetString(rowDel, "USER_TEXT"),
+                        DeliverableComments = delivComments,
+                        DeliverableFiles = ListFiles
                     });
                 }
                 curAction.List_Deliverables = curListDeliverable;

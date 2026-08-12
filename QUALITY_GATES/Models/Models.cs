@@ -95,6 +95,7 @@ public class GATES_DELIVERABLES
     public string DELIVERABLE_TYPE_GENERATION { get; set; } = string.Empty; // DEFAULT, MANUAL
     public string DELIVERABLE_ACCEPTANCE_CRITERIA { get; set; } = string.Empty;
     public string DELIVERABLE_TYPE { get; set; } = string.Empty; // FILE or TEXT
+    public string PATH_TO_SAVE_FILES { get; set; } = string.Empty;
     // CURRENT STATUS OF DELIVERABLE
     public string DELIVERABLE_STATUS_ID { get; set; } = string.Empty;
     public string ACCOUNTED_STATUS_ID { get; set; } = string.Empty;

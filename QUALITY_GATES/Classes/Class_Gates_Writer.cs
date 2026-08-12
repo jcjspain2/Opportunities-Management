@@ -28,13 +28,15 @@ namespace QUALITY_GATES.Classes
                                                                        int delId,
                                                                        DeliverableRolesEstructure RoleDeliverable,
                                                                        string STATUS_ID_TO_UPDATE,
+                                                                       string userId,
                                                                        CancellationToken cancellationToken = default)
         {
             var keyProcess = RoleDeliverable == DeliverableRolesEstructure.Responsible ? "DEL_RESP" : "DEL_ACC";
 
             var validationResult = await _db.GetDatatableFromSelectAsync(
                 SQL_Validate_Deliverable_Status(),
-                new[] { new SqlParameter("@StatusIdToUpdate", STATUS_ID_TO_UPDATE), new SqlParameter("@KeyProcess", keyProcess) },
+                new[] { new SqlParameter("@StatusIdToUpdate", STATUS_ID_TO_UPDATE), 
+                       new SqlParameter("@KeyProcess", keyProcess) },
                 cancellationToken: cancellationToken);
 
             if (!validationResult.Success || validationResult.DTResults == null)
@@ -53,7 +55,8 @@ namespace QUALITY_GATES.Classes
                 new SqlParameter("@OppLineId",        oppLineId),
                 new SqlParameter("@StatusId",         statusId),
                 new SqlParameter("@SgateId",          sgateId),
-                new SqlParameter("@DelId",            delId)
+                new SqlParameter("@DelId",            delId),
+                new SqlParameter("@UserId",           userId)
             };
 
             var result = await _db.NonQueryDataToSQLServer(updateSql, updateParams, cancellationToken: cancellationToken);
@@ -70,13 +73,14 @@ namespace QUALITY_GATES.Classes
         private static string SQL_Validate_Deliverable_Status() => @"
             SELECT COUNT(1)
             FROM   dbo.MAS_GATE_STATUS
-            WHERE  STATUS_ID   = @StatusIdToUpdate
+            WHERE  GATE_STATUS_ID   = @StatusIdToUpdate
               AND  KEY_PROCESS = @KeyProcess";
 
         private static string SQL_Update_Deliverable_Responsible_Status() => @"
             UPDATE dbo.TRA_PROJECTS_DELIVERABLES
             SET    DELIVERABLE_STATUS_ID = @StatusIdToUpdate,
-                   MODIFIED_DATE        = SYSDATETIME()
+                   MODIFIED_DATE        = SYSDATETIME(),
+                   MODIFIED_BY          = @UserId
             WHERE  OPP_LINE_ID   = @OppLineId
               AND  STATUS_ID     = @StatusId
               AND  SGATE_ID      = @SgateId
@@ -196,8 +200,7 @@ namespace QUALITY_GATES.Classes
 
         private static string SQL_Update_Project_Priority() => @"
             UPDATE dbo.TRA_PROJECTS
-            SET    PRIORITY      = @Priority,
-                   MODIFIED_DATE = SYSDATETIME()
+            SET    PRIORITY      = @Priority
             WHERE  OPPORTUNITY_LINE_ID = @OppLineId";
 
     }
