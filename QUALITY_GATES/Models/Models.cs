@@ -68,7 +68,22 @@ public class PROJECT_STATUS
     public int TOTAL_DELIVERABLES_PENDING_ACCOUNTANT { get; set; } = 0;
     
 }
+public class MY_TASKS
+{
+    public string OPP_ID { get; set; } = string.Empty;
+    public string OPP_LINE_ID { get; set; } = string.Empty;
+    public string STATUS_ID { get; set; } = string.Empty; 
+    public string ACTION_ID { get; set; } = string.Empty;
+    public Priority OPP_LINE_PRIORITY { get; set; } = Priority.Normal;
+    public string OPP_NAME { get; set; } = string.Empty;
+    public string OPP_LINE_NAME { get; set; } = string.Empty;
+    public string STATUS_NAME { get; set; } = string.Empty; 
+    public string ACTION_NAME { get; set; } = string.Empty;
+    public string SALES_ORGANIZATION { get; set; } = string.Empty;
 
+    public GATES_DELIVERABLES Deliverable { get; set; } = new();
+
+}
 public class GATES_ACTIONS
 {
     public string STATUS_ID { get; set; } = string.Empty; // FEAS
@@ -129,12 +144,9 @@ public class GATES_DELIVERABLES
     public string LINK_TO_INSTRUCTION_TO_FOLLOW { get; set; } = string.Empty;
     public string DELIVERABLE_USER_TEXT { get; set; } = string.Empty;
 
-
-
-
-
     public List<DELIVERABLE_FILE> DeliverableFiles { get; set; } = new();
     public List<DELIVERABLES_COMMENTS> DeliverableComments { get; set; } = new();
+    public List<DELIVERABLES_COMMENTS> AccountantComments { get; set; } = new();
 
 }
 public class DELIVERABLES_COMMENTS
