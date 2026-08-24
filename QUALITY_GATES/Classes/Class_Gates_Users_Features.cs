@@ -15,9 +15,30 @@ namespace QUALITY_GATES.Classes
         /// <summary>
         /// Updates an especific deliverable with ginen USER_ID
         /// </summary>
-        /// <param name="Type_Alloc">RESP updates responsible, ACC updates accountant person</param>
+        /// <param name="Role">Must use Estructure for role</param>
         /// <returns>Sucess or fail with detailed message</returns>
         public async Task<Return_SQL_Action> AllocateUserIDToDeliverable(string OPP_LINE_ID,
+                                                                          string STATUS_ID,
+                                                                          string SGATE_ID,
+                                                                          string DELIVERABLE_ID,
+                                                                          string USER_ID,
+                                                                          DeliverableRolesEstructure Role,
+                                                                          CancellationToken cancellationToken = default)
+        {
+            string Type_Alloc = Role switch
+            {
+                DeliverableRolesEstructure.Responsible => "RESP",
+                DeliverableRolesEstructure.Accountable => "ACC",
+                _ => throw new ArgumentException($"Invalid role: {Role}", nameof(Role))
+            };
+            return await AllocateUserIDToDeliverable(OPP_LINE_ID, STATUS_ID, SGATE_ID, DELIVERABLE_ID, USER_ID, Type_Alloc, cancellationToken);
+        }
+        /// <summary>
+        /// Updates an especific deliverable with ginen USER_ID
+        /// </summary>
+        /// <param name="Type_Alloc">RESP updates responsible, ACC updates accountant person</param>
+        /// <returns>Sucess or fail with detailed message</returns>
+        private async Task<Return_SQL_Action> AllocateUserIDToDeliverable(string OPP_LINE_ID,
                                                                           string STATUS_ID,
                                                                           string SGATE_ID,
                                                                           string DELIVERABLE_ID,

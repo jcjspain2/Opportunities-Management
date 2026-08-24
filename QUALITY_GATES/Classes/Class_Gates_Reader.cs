@@ -16,6 +16,168 @@ using System.Diagnostics;
 
 public partial class Class_Projects_Quality_Gates // Reader provide functions to display in UI current staus of projects and quality gates
 {
+    /// <summary>
+    /// Checks whether the requesting user's job title is authorized for a given key process.
+    /// </summary>
+    /// <param name="KeyProcess">Key process to check restrictions against (e.g. 'GATE_GEN').</param>
+    /// <param name="UserRequester">User ID (samaccountname) of the user making the request.</param>
+    /// <returns>
+    /// The <see cref="USERS_DETAILS"/> of the user if authorized.
+    /// Throws <see cref="InvalidOperationException"/> if the user is not found, has no standard job title,
+    /// no restrictions are defined for the key process, or the user's job title is not in the authorized list.
+    /// </returns>
+    private async Task<OperationResult<bool>> Get_KeyProcess_Job_title_Restriction(string KeyProcess,
+                                                                            string UserRequester = "System",
+                                                                            CancellationToken cancellationToken = default)
+    {
+        // Step 1: resolve user's job title — returns Fail if user not found or has no standard job title
+        var userDetails = await GetUser_ID_Job_Description(UserRequester, cancellationToken);
+        if (!userDetails.Success)
+            return OperationResult<bool>.Fail(userDetails.ErrorMessage);
+
+        // Step 2: retrieve authorized job titles for this key process
+        const string sql_KEY_PROCESS_CHECK = """
+                  SELECT [JOB_TITLE]
+                  FROM [dbo].[MAS_JOB_TITLES_RESTRICTIONS]
+                  WHERE MODULE_ID = 'Q_GATES' AND KEY_PROCESS = @KeyProcess
+                  """;
+
+        var parameters = new[] { new SqlParameter("@KeyProcess", KeyProcess) };
+
+        var queryResult = await _db.GetDatatableFromSelectAsync(sql_KEY_PROCESS_CHECK, parameters, cancellationToken: cancellationToken);
+
+        if (!queryResult.Success || queryResult.DTResults == null)
+            return OperationResult<bool>.Fail($"Database error retrieving restrictions for key process '{KeyProcess}': {queryResult.Message}");
+
+
+        if (queryResult.DTResults.Rows.Count == 0)
+            return OperationResult<bool>.Fail($"User '{UserRequester}' do not have proper job title to generate next gate.");
+
+
+        // Step 3: check if the user's job title is in the authorized list
+        var authorizedRoles = queryResult.DTResults.Rows
+            .Cast<DataRow>()
+            .Select(r => GetString(r, "JOB_TITLE"))
+            .ToList();
+
+        if (!authorizedRoles.Contains(userDetails.Data.User_Q_GATES_Job_Title_ID, StringComparer.OrdinalIgnoreCase))
+            return OperationResult<bool>.Fail(
+                $"User '{UserRequester}' with job title '{userDetails.Data.User_Q_GATES_Job_Title_ID}' " +
+                $"is not authorized for key process '{KeyProcess}'. " +
+                $"Allowed roles: {string.Join(", ", authorizedRoles)}.");
+
+        return OperationResult<bool>.Ok(true);
+    }
+
+    /// <summary>
+    /// Recovers Job Title of an especific USER_ID if can not recover produces an error.
+    /// </summary>
+    /// <param name="UserRequester">User logged into app that makes request.</param>
+    /// <returns>Return object USER_DETAILS, to display Job description and more details, if not recovered show error</returns>
+    
+    private async Task<OperationResult<USERS_DETAILS>>GetUser_ID_Job_Description(string UserRequester = "System",
+                                                                     CancellationToken cancellationToken = default)
+    {
+        const string sqlUser_Job_title = """
+                  SELECT T1.samaccountname,T1.EmailAddress,T1.GivenName,T1.Surname,
+                         T1.DisplayName,T1.Title,T1.Department,T1.Office,
+                         T2.ManagerEmail,T2.FunManagerEmail,T2.State,JobRole,T2.jobTitle,employeeLevel,
+                         ISNULL(T3.JOB_TITLE_ID,'') JOB_TITLE_ID,ISNULL(T4.JOB_TITLE_DESCRIPTION,'') JOB_TITLE_DESCRIPTION
+                  FROM dbo.MAS_AD_Users T1
+                  LEFT JOIN dbo.MAS_USERS_CADENA T2 on T1.EmailAddress=T2.Email
+                  LEFT JOIN dbo.MAS_JOB_TITLES_CADENA T3 ON T3.JOB_TITLE_CADENA=T2.jobTitle
+                  LEFT JOIN dbo.MAS_JOB_TITLES T4 ON T3.JOB_TITLE_ID=T4.JOB_TITLE_ID
+                  WHERE T1.Enabled=1 and T1.EmailAddress <> '' AND T1.samaccountname=@User_ID
+                  """;
+
+        var parameters = new[] { new SqlParameter("@User_ID", UserRequester) };
+
+        var queryResult = await _db.GetDatatableFromSelectAsync(sqlUser_Job_title, parameters, cancellationToken: cancellationToken);
+
+        if (!queryResult.Success || queryResult.DTResults == null)
+            return OperationResult<USERS_DETAILS>.Fail($"Database error retrieving user '{UserRequester}': {queryResult.Message}");
+
+        if (queryResult.DTResults.Rows.Count == 0)
+            return OperationResult<USERS_DETAILS>.Fail($"User '{UserRequester}' was not found in the system.");
+
+        DataRow row = queryResult.DTResults.Rows[0];
+        string jobTitleDescription = GetString(row, "JOB_TITLE_DESCRIPTION");
+
+        if (string.IsNullOrEmpty(jobTitleDescription))
+            return OperationResult<USERS_DETAILS>.Fail($"User '{UserRequester}' does not have a standard job description assigned. " +
+                $"The job title '{GetString(row, "jobTitle")}' is not mapped to any Quality Gates standard role.");
+
+        return OperationResult<USERS_DETAILS>.Ok(new USERS_DETAILS
+        {
+            UserId                      = GetString(row, "samaccountname"),
+            User_Display_Name           = GetString(row, "DisplayName"),
+            User_Q_GATES_Job_Title      = jobTitleDescription,
+            User_Q_GATES_Job_Title_ID   = GetString(row, "JOB_TITLE_ID"),
+            User_Cadena_JobTitle        = GetString(row, "jobTitle"),
+            UserSite                    = GetString(row, "Office"),
+            UserManager_Mail            = GetString(row, "ManagerEmail"),
+            UserManager_Functional_Mail = GetString(row, "FunManagerEmail")
+        });
+       
+    }
+
+    
+
+   
+    /// <summary>
+    /// REturns all users ID that belong to a given job title.
+    /// </summary>
+    /// <param name="UserRequest">User logged into app that makes requests, restriction can be checked.</param>
+    /// <param name="JobTitle">Job Title Target where User Id should be allocated</param>
+    /// <returns>Return object USER_DETAILS, to display and choose</returns>
+    public async Task<OperationResult<List<USERS_DETAILS>>> Get_Users_ID_By_JobTitle(string UserRequest, string JobTitle)
+    {
+        CancellationToken cancellationToken = default;
+        const string SQL_Users_Id_By_JobTitle = """
+                     SELECT T1.samaccountname,T1.EmailAddress,T1.GivenName,T1.Surname,
+                                 T1.DisplayName,T1.Title,T1.Department,T1.Office,
+                                 T2.ManagerEmail,T2.FunManagerEmail,T2.State,JobRole,T2.jobTitle,employeeLevel,
+                                 T3.JOB_TITLE_ID,T4.JOB_TITLE_DESCRIPTION
+                     FROM dbo.MAS_AD_Users T1
+                     LEFT JOIN dbo.MAS_USERS_CADENA T2 on T1.EmailAddress=T2.Email
+                     LEFT JOIN dbo.MAS_JOB_TITLES_CADENA T3 ON T3.JOB_TITLE_CADENA=T2.jobTitle
+                     LEFT JOIN dbo.MAS_JOB_TITLES T4 ON T3.JOB_TITLE_ID=T4.JOB_TITLE_ID
+                     WHERE T1.Enabled=1 and T1.EmailAddress <> '' AND T3.JOB_TITLE_ID=@JOB_TITLE_ID
+                  """;
+        var parameters = new[] { new SqlParameter("@JOB_TITLE_ID", JobTitle) };
+
+        var queryResult = await _db.GetDatatableFromSelectAsync(SQL_Users_Id_By_JobTitle, parameters, cancellationToken: cancellationToken);
+        if (!queryResult.Success || queryResult.DTResults == null)
+            return OperationResult<List<USERS_DETAILS>>.Fail($"Error: {queryResult.Message}");
+
+        if (queryResult.DTResults.Rows.Count == 0)
+            return OperationResult<List<USERS_DETAILS>>.Fail($"No users found for job title '{JobTitle}'.");
+
+        try
+        {
+            var resultList = new List<USERS_DETAILS>();
+            foreach (DataRow row in queryResult.DTResults.Rows)
+            {
+                resultList.Add(new USERS_DETAILS
+                {
+                    UserId                      = GetString(row, "samaccountname"),
+                    User_Display_Name           = GetString(row, "DisplayName"),
+                    User_Q_GATES_Job_Title      = GetString(row, "JOB_TITLE_DESCRIPTION"),
+                    User_Q_GATES_Job_Title_ID   = GetString(row, "JOB_TITLE_ID"),
+                    User_Cadena_JobTitle        = GetString(row, "jobTitle"),
+                    UserSite                    = GetString(row, "Office"),
+                    UserManager_Mail            = GetString(row, "ManagerEmail"),
+                    UserManager_Functional_Mail = GetString(row, "FunManagerEmail"),
+                });
+            }
+            return OperationResult<List<USERS_DETAILS>>.Ok(resultList);
+        }
+        catch (Exception ex)
+        {
+            return OperationResult<List<USERS_DETAILS>>.Fail($"Error: {ex.Message}");
+        }
+    }
+
     private static string SQL_Get_Accountant_Pending_Approval_MyTasks() => @"
             SELECT T1.OPP_LINE_ID,T1.STATUS_ID,T1.SGATE_ID,T1.DELIVERABLE_ID,T1.DELIVERABLE_STATUS_ID,T1.ACCOUNTABLE_STATUS_ID,T1.DELIVERABLE_CREATION_TYPE,
                     T1.DELIVERABLE_NAME,T1.DELIVERABLE_ACEPTANCE_CRITERIA,T1.PLANNED_START_DATE,T1.PLANNED_END_DATE,T1.ACTUAL_START_DATE,T1.ACTUAL_END_DATE,T1.USER_START_DATE,
@@ -782,5 +944,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
         FROM  dbo.TRA_PROJECTS_DELIVERABLE_COMMENTS C
         WHERE C.OPP_LINE_ID =@OppLineId  AND C.STATUS_ID = @GateId AND C.SGATE_ID= @StatusId AND C.DEL_ID=@DelivID AND KEY_PROCESS='ACC'
         ORDER BY C.SGATE_ID, C.DEL_ID, C.COMMENT_DATE ASC";
+
+   
 
 }

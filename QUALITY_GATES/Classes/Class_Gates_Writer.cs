@@ -159,7 +159,14 @@ namespace QUALITY_GATES.Classes
                                                                        string userId,
                                                                        CancellationToken cancellationToken = default)
         {
-            // TODO: validar que userId tiene permiso para modificar la prioridad del proyecto antes de ejecutar el UPDATE
+            // Check if the user has the required job title to perform this action
+            if (userId != "System") // System always allowed to generate next gate, no matter the job title
+            {
+                var resultJob = await Get_KeyProcess_Job_title_Restriction("@PRIORITY", userId, cancellationToken);
+                if (!resultJob.Success)
+                    return OperationResult<bool>.Fail($"Error: {resultJob.ErrorMessage}");
+          
+            }
 
             var parameters = new[]
             {

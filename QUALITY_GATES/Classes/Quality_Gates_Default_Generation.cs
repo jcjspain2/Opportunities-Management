@@ -2,12 +2,20 @@ namespace QUALITY_GATES.Classes;
 
 using Microsoft.Data.SqlClient;
 using QUALITY_GATES.Data;
+using QUALITY_GATES.Models;
 using System.Data;
 
 public partial class Class_Projects_Quality_Gates
 {
     public async Task<Return_SQL_Action> Generate_Next_Default_Gate(string OPP_LINE_ID, string UserRequester="System",CancellationToken cancellationToken = default)
     {
+        // Check if requester user has right to do it
+        if (UserRequester != "System") // System always allowed to generate next gate, no matter the job title
+        {
+            var result = await Get_KeyProcess_Job_title_Restriction("@GATE_GEN ", UserRequester, cancellationToken);
+            if (!result.Success)
+                return new Return_SQL_Action { Success = false, Message = result.ErrorMessage };
+        }
         // Determine which is the next gate to generate: first one not yet created for this project
         const string sqlNextGate = """
               SELECT T1.STATUS_ID,STATUS_SEQUENCE,T2.STATUS_ID,ISNULL(CURRENT_STATUS,'NO_GEN') AS CURRENT_STATUS
@@ -74,8 +82,6 @@ public partial class Class_Projects_Quality_Gates
                    DELIVERABLE_TYPE,
                    DELIVERABLE_ACTION,
                    DELIVERABLE_ACEPTANCE_CRITERIA,
-                   DELIVERABLE_LINK,
-                   DELIVERABLE_TEXT_USER,
                    INSTRUCTION_LINK,
                    SAMPLE_LINK,
                    DEFAULT_LEAD_TIME_DAYS,
