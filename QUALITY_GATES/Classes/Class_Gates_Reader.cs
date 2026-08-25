@@ -7,12 +7,13 @@ using QUALITY_GATES.Models;
 using System.Collections;
 using System.Collections.Generic;
 using System.Data;
+using System.Data.SqlTypes;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
+using  UtilidadesFichero;
 using static QUALITY_GATES.Data.SqlConnectionFactory;
 using static QUALITY_GATES.Tools.Static_Local_Functions;
-using  UtilidadesFichero;
-using System.Diagnostics;
 
 public partial class Class_Projects_Quality_Gates // Reader provide functions to display in UI current staus of projects and quality gates
 {
@@ -36,6 +37,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
             return OperationResult<bool>.Fail(userDetails.ErrorMessage);
 
         // Step 2: retrieve authorized job titles for this key process
+        //TODO: Use MODULE_ID instead Q_GATES
         const string sql_KEY_PROCESS_CHECK = """
                   SELECT [JOB_TITLE]
                   FROM [dbo].[MAS_JOB_TITLES_RESTRICTIONS]
@@ -216,8 +218,146 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
             LEFT JOIN dbo.MAS_GATE_STATUS T9 ON T9.GATE_STATUS_ID=T1.ACCOUNTABLE_STATUS_ID AND T9.KEY_PROCESS='DEL_ACC' 
             WHERE T1.RESPONSIBLE_USER_ID=@UserId";
 
+    private static string SQL_Get_Deliverable() => @"
+            SELECT T1.OPP_LINE_ID,T1.STATUS_ID,T1.SGATE_ID,T1.DELIVERABLE_ID,T1.DELIVERABLE_STATUS_ID,T1.ACCOUNTABLE_STATUS_ID,T1.DELIVERABLE_CREATION_TYPE,
+                    T1.DELIVERABLE_NAME,T1.DELIVERABLE_ACEPTANCE_CRITERIA,T1.PLANNED_START_DATE,T1.PLANNED_END_DATE,T1.ACTUAL_START_DATE,T1.ACTUAL_END_DATE,T1.USER_START_DATE,
+                    T1.USER_FINISH_DATE,T1.RESPONSIBLE_JOB_ID,T1.ACCOUNTABLE_JOB_ID,T1.RESPONSIBLE_USER_ID,T1.ACCOUNTABLE_USER_ID,T1.CREATED_BY,T1.CREATED_DATE,T1.MODIFIED_BY,
+                    T1.MODIFIED_DATE,T1.USER_TEXT,T1.NEXT_GATE_TRIGGERS,T1.PATH_TO_SAVE,T5.GATE_TEXT_EXPLANATION,T4.STATUS_DESCRIPTION,
+                    T3.OPPORTUNITY_ID,ISNULL(T6.JOB_TITLE_DESCRIPTION,'') AS JOB_DESCRIP_RESP,ISNULL(T7.JOB_TITLE_DESCRIPTION,'') AS JOB_DESCRIP_ACC,
+                    ISNULL(T8.GATE_STATUS_DESC,'') AS DEL_STATUS_DESC,ISNULL(T9.GATE_STATUS_DESC,'') AS ACC_STATUS_DESC,T3.Priority,T3.OPPORTUNITY_NAME,T3.OPPORTUNITY_LNE_NAME,
+                    T3.SALES_ORGANIZATION
+            FROM dbo.TRA_PROJECTS_DELIVERABLES T1
+            JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID='Q_GATES' AND T2.KEY_PROCESS='DEL_RESP' AND T2.GATE_STATUS_ID=T1.DELIVERABLE_STATUS_ID 
+            JOIN dbo.TRA_PROJECTS T3 ON T3.OPPORTUNITY_LINE_ID=T1.OPP_LINE_ID
+            JOIN dbo.MAS_STATUS T4 ON T4.STATUS_MODULE='Q_GATES' AND T4.STATUS_ID=T1.STATUS_ID
+            JOIN dbo.TRA_PROJECTS_GATES T5 ON T5.OPP_LINE_ID=T1.OPP_LINE_ID  AND T5.STATUS_ID=T1.STATUS_ID AND T5.SGATE_ID=T1.SGATE_ID
+            LEFT JOIN dbo.MAS_JOB_TITLES T6 ON T6.JOB_TITLE_ID=T1.RESPONSIBLE_JOB_ID
+            LEFT JOIN dbo.MAS_JOB_TITLES T7 ON T7.JOB_TITLE_ID=T1.ACCOUNTABLE_JOB_ID
+            LEFT JOIN dbo.MAS_GATE_STATUS T8 ON T8.GATE_STATUS_ID=T1.DELIVERABLE_STATUS_ID AND T8.KEY_PROCESS='DEL_RESP'  
+            LEFT JOIN dbo.MAS_GATE_STATUS T9 ON T9.GATE_STATUS_ID=T1.ACCOUNTABLE_STATUS_ID AND T9.KEY_PROCESS='DEL_ACC' 
+            WHERE T1.OPP_LINE_ID=@OppLineId AND T1.STATUS_ID = @GateId AND T1.SGATE_ID = @StatusId AND T1.DELIVERABLE_ID= @DelivID";
 
+    public async Task<OperationResult<GATES_DELIVERABLES>> Get_Deliverable(string OPP_LINE_ID, string STATUS_ID, string GATE_ID, int DELIVERABLE_ID)
+    {
+        CancellationToken cancellationToken = default;
+        GATES_DELIVERABLES resultDel= new GATES_DELIVERABLES();
+        var paramsCommentsDeliverable = new[]
+                {
+                    new SqlParameter("@OppLineId", OPP_LINE_ID),
+                    new SqlParameter("@GateId",    STATUS_ID),
+                    new SqlParameter("@StatusId",  GATE_ID),
+                    new SqlParameter("@DelivID",   DELIVERABLE_ID)
+                };
+        var paramsCommentsAcc = new[]
+{
+                    new SqlParameter("@OppLineId",  OPP_LINE_ID),
+                    new SqlParameter("@GateId",    STATUS_ID),
+                    new SqlParameter("@StatusId",  GATE_ID),
+                    new SqlParameter("@DelivID",    DELIVERABLE_ID)
+                };
+        var paramsDeliverable = new[]
+{
+                    new SqlParameter("@OppLineId",  OPP_LINE_ID),
+                    new SqlParameter("@GateId",    STATUS_ID),
+                    new SqlParameter("@StatusId",  GATE_ID),
+                    new SqlParameter("@DelivID",    DELIVERABLE_ID)
+                };
+        // Responsible comments (KEY_PROCESS='DELIV')
+        var delivCommentsResult = await _db.GetDatatableFromSelectAsync(SQL_Projects_Deliverable_Comments_Per_Deliverable(), paramsCommentsDeliverable, cancellationToken: cancellationToken);
+        var delivComments = new List<DELIVERABLES_COMMENTS>();
+        if (delivCommentsResult.Success && delivCommentsResult.DTResults != null)
+        {
+            foreach (DataRow cr in delivCommentsResult.DTResults.Rows)
+                delivComments.Add(new DELIVERABLES_COMMENTS
+                {
+                    OppLineId = OPP_LINE_ID,
+                    Gate_Id = STATUS_ID,
+                    StatusiD = GATE_ID,
+                    DeliverableID = DELIVERABLE_ID,
+                    Id = new Guid(GetString(cr, "COMMENT_ID")),
+                    COMMENT_TEXT = GetString(cr, "COMMENT_TEXT"),
+                    USER = GetString(cr, "COMMENT_BY"),
+                    COMMENT_DATE = GetDateTime(cr, "COMMENT_DATE"),
+                });
+        }
 
+        // Accountant comments (KEY_PROCESS='ACC')
+        var accCommentsResult = await _db.GetDatatableFromSelectAsync(SQL_Projects_Deliverable_Comments_Accountant_Per_Deliverable(), paramsCommentsAcc, cancellationToken: cancellationToken);
+        var accComments = new List<DELIVERABLES_COMMENTS>();
+        if (accCommentsResult.Success && accCommentsResult.DTResults != null)
+        {
+            foreach (DataRow cr in accCommentsResult.DTResults.Rows)
+                accComments.Add(new DELIVERABLES_COMMENTS
+                {
+                    OppLineId = OPP_LINE_ID,
+                    Gate_Id = STATUS_ID,
+                    StatusiD = GATE_ID,
+                    DeliverableID = DELIVERABLE_ID,
+                    Id = new Guid(GetString(cr, "COMMENT_ID")),
+                    COMMENT_TEXT = GetString(cr, "COMMENT_TEXT"),
+                    USER = GetString(cr, "COMMENT_BY"),
+                    COMMENT_DATE = GetDateTime(cr, "COMMENT_DATE"),
+                });
+        }
+
+        // Files from DMS for this deliverable
+        var filesResult = await Get_DMS_Files_Per_Deliverable(OPP_LINE_ID, STATUS_ID, GATE_ID, DELIVERABLE_ID.ToString());
+        var delivFiles = filesResult.Success ? filesResult.Data : new List<DELIVERABLE_FILE>();
+
+        // Recovery of deliverable
+        var queryResult = await _db.GetDatatableFromSelectAsync(SQL_Get_Deliverable(), paramsDeliverable , cancellationToken: cancellationToken);
+        if (!queryResult.Success || queryResult.DTResults == null)
+            return OperationResult<GATES_DELIVERABLES>.Fail($"Error: {queryResult.Message}");
+        try
+        {
+            foreach (DataRow row in queryResult.DTResults.Rows)
+            {
+                resultDel = new GATES_DELIVERABLES
+                {
+                    OPP_LINE_ID = OPP_LINE_ID,
+                    STATUS_ID = STATUS_ID,
+                    ACTION_ID = GATE_ID,
+                    DELIVERABLE_SEQUENCE = DELIVERABLE_ID,
+                    DELIVERABLE_DESCRIPTION = GetString(row, "DELIVERABLE_NAME"),
+                    DELIVERABLE_TYPE_GENERATION = GetString(row, "DELIVERABLE_CREATION_TYPE"),
+                    DELIVERABLE_TYPE = GetString(row, "DELIVERABLE_CREATION_TYPE"),
+                    DELIVERABLE_ACCEPTANCE_CRITERIA = GetString(row, "DELIVERABLE_ACEPTANCE_CRITERIA"),
+                    PATH_TO_SAVE_FILES = GetString(row, "PATH_TO_SAVE"),
+                    DELIVERABLE_STATUS_ID = GetString(row, "DELIVERABLE_STATUS_ID"),
+                    ACCOUNTED_STATUS_ID = GetString(row, "ACCOUNTABLE_STATUS_ID"),
+                    RESPONSIBLE_JOB_ID = GetString(row, "RESPONSIBLE_JOB_ID"),
+                    ACCOUNTABLE_JOB_ID = GetString(row, "ACCOUNTABLE_JOB_ID"),
+                    RESPONSIBLE_JOB_NAME = GetString(row, "JOB_DESCRIP_RESP"),
+                    ACCOUNTABLE_JOB_NAME = GetString(row, "JOB_DESCRIP_ACC"),
+                    RESPONSIBLE_USER_ID = GetString(row, "RESPONSIBLE_USER_ID"),
+                    ACCOUNTABLE_USER_ID = GetString(row, "ACCOUNTABLE_USER_ID"),
+                    PLANNED_START_DATE = GetDateOnly(row, "PLANNED_START_DATE"),
+                    PLANNED_END_DATE = GetDateOnly(row, "PLANNED_END_DATE"),
+                    ACTUAL_START_DATE = GetDateOnly(row, "ACTUAL_START_DATE"),
+                    ACTUAL_END_DATE = GetDateOnly(row, "ACTUAL_END_DATE"),
+                    USER_START_DATE = GetDateOnly(row, "USER_START_DATE"),
+                    USER_END_DATE = GetDateOnly(row, "USER_FINISH_DATE"),
+                    DELIVERABLE_USER_TEXT = GetString(row, "USER_TEXT"),
+                    ACCOUNTED_STATUS_DESCRIPTION = GetString(row, "ACC_STATUS_DESC"),
+                    DELIVERABLE_STATUS_DESCRIPTION = GetString(row, "DEL_STATUS_DESC"),
+                    DeliverableFiles = delivFiles,
+                    DeliverableComments = delivComments,
+                    AccountantComments = accComments
+                };
+                break;
+            }
+            return OperationResult<GATES_DELIVERABLES>.Ok(resultDel);
+        }
+        
+        catch (Exception ex)
+        {
+            return OperationResult<GATES_DELIVERABLES>.Fail($"Error: {ex.Message}");
+        }
+     
+
+        }
+
+       
     public async Task<OperationResult<List<MY_TASKS>>> Get_MyTasks_Pending(string UserId, DeliverableRolesEstructure Role)
     {
         var paramsAcc = new[] { new SqlParameter("@UserId", UserId) };
@@ -235,7 +375,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                 return OperationResult<List<MY_TASKS>>.Fail($"Error: Invalid role specified.");
         }
     
-    var queryResult = await _db.GetDatatableFromSelectAsync(SqlString, paramsAcc, cancellationToken: cancellationToken);
+         var queryResult = await _db.GetDatatableFromSelectAsync(SqlString, paramsAcc, cancellationToken: cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
             return OperationResult<List<MY_TASKS>>.Fail($"Error: {queryResult.Message}");
 
@@ -244,115 +384,22 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
             var resultList = new List<MY_TASKS>();
             foreach (DataRow row in queryResult.DTResults.Rows)
             {
-                var oppLineId = GetString(row, "OPP_LINE_ID");
-                var statusId  = GetString(row, "STATUS_ID");
-                var sgateId   = GetString(row, "SGATE_ID");
-                var delivId   = GetInt(row, "DELIVERABLE_ID");
-
-                var paramsCommentsDeliverable = new[]
+                 resultList.Add(new MY_TASKS
                 {
-                    new SqlParameter("@OppLineId", oppLineId),
-                    new SqlParameter("@GateId",    statusId),
-                    new SqlParameter("@StatusId",  sgateId),
-                    new SqlParameter("@DelivID",   delivId)
-                };
-                var paramsCommentsAcc = new[]
-{
-                    new SqlParameter("@OppLineId", oppLineId),
-                    new SqlParameter("@GateId",    statusId),
-                    new SqlParameter("@StatusId",  sgateId),
-                    new SqlParameter("@DelivID",   delivId)
-                };
-
-                // Responsible comments (KEY_PROCESS='DELIV')
-                var delivCommentsResult = await _db.GetDatatableFromSelectAsync(SQL_Projects_Deliverable_Comments_Per_Deliverable(), paramsCommentsDeliverable, cancellationToken: cancellationToken);
-                var delivComments = new List<DELIVERABLES_COMMENTS>();
-                if (delivCommentsResult.Success && delivCommentsResult.DTResults != null)
-                {
-                    foreach (DataRow cr in delivCommentsResult.DTResults.Rows)
-                        delivComments.Add(new DELIVERABLES_COMMENTS
-                        {
-                            OppLineId     = oppLineId,
-                            Gate_Id       = statusId,
-                            StatusiD      = sgateId,
-                            DeliverableID = delivId,
-                            Id            = new Guid(GetString(cr, "COMMENT_ID")),
-                            COMMENT_TEXT  = GetString(cr, "COMMENT_TEXT"),
-                            USER          = GetString(cr, "COMMENT_BY"),
-                            COMMENT_DATE  = GetDateTime(cr, "COMMENT_DATE"),
-                        });
-                }
-
-                // Accountant comments (KEY_PROCESS='ACC')
-                var accCommentsResult = await _db.GetDatatableFromSelectAsync(SQL_Projects_Deliverable_Comments_Accountant_Per_Deliverable(), paramsCommentsAcc, cancellationToken: cancellationToken);
-                var accComments = new List<DELIVERABLES_COMMENTS>();
-                if (accCommentsResult.Success && accCommentsResult.DTResults != null)
-                {
-                    foreach (DataRow cr in accCommentsResult.DTResults.Rows)
-                        accComments.Add(new DELIVERABLES_COMMENTS
-                        {
-                            OppLineId     = oppLineId,
-                            Gate_Id       = statusId,
-                            StatusiD      = sgateId,
-                            DeliverableID = delivId,
-                            Id            = new Guid(GetString(cr, "COMMENT_ID")),
-                            COMMENT_TEXT  = GetString(cr, "COMMENT_TEXT"),
-                            USER          = GetString(cr, "COMMENT_BY"),
-                            COMMENT_DATE  = GetDateTime(cr, "COMMENT_DATE"),
-                        });
-                }
-
-                // Files from DMS for this deliverable
-                var filesResult = await Get_DMS_Files_Per_Deliverable(oppLineId, statusId, sgateId, delivId.ToString());
-                var delivFiles = filesResult.Success ? filesResult.Data : new List<DELIVERABLE_FILE>();
-
-                resultList.Add(new MY_TASKS
-                {
-                    OPP_ID      = GetString(row, "OPPORTUNITY_ID"),
-                    OPP_LINE_ID = oppLineId,
-                    STATUS_ID   = statusId,
-                    ACTION_ID   = sgateId,
+                    OPP_ID = GetString(row, "OPPORTUNITY_ID"),
+                    OPP_LINE_ID = GetString(row, "OPP_LINE_ID"),
+                    STATUS_ID = GetString(row, "STATUS_ID"),
+                    ACTION_ID = GetString(row, "SGATE_ID"),
+                    DELIVERABLE_ID= GetInt(row, "DELIVERABLE_ID"),
                     STATUS_NAME = GetString(row, "STATUS_DESCRIPTION"),
                     ACTION_NAME = GetString(row, "GATE_TEXT_EXPLANATION"),
                     OPP_LINE_PRIORITY = PriorityExtensions.FromValue(GetInt(row, "PRIORITY")),
-                    OPP_NAME      = GetString(row, "OPPORTUNITY_NAME"),
+                    OPP_NAME = GetString(row, "OPPORTUNITY_NAME"),
                     OPP_LINE_NAME = GetString(row, "OPPORTUNITY_LNE_NAME"),
-                    SALES_ORGANIZATION = GetString(row, "SALES_ORGANIZATION"),
-                    Deliverable = new GATES_DELIVERABLES
-                    {
-                        OPP_LINE_ID                     = oppLineId,
-                        STATUS_ID                       = statusId,
-                        ACTION_ID                       = sgateId,
-                        DELIVERABLE_SEQUENCE            = delivId,
-                        DELIVERABLE_DESCRIPTION         = GetString(row, "DELIVERABLE_NAME"),
-                        DELIVERABLE_TYPE_GENERATION     = GetString(row, "DELIVERABLE_CREATION_TYPE"),
-                        DELIVERABLE_TYPE                = GetString(row, "DELIVERABLE_CREATION_TYPE"),
-                        DELIVERABLE_ACCEPTANCE_CRITERIA = GetString(row, "DELIVERABLE_ACEPTANCE_CRITERIA"),
-                        PATH_TO_SAVE_FILES              = GetString(row, "PATH_TO_SAVE"),
-                        DELIVERABLE_STATUS_ID           = GetString(row, "DELIVERABLE_STATUS_ID"),
-                        ACCOUNTED_STATUS_ID             = GetString(row, "ACCOUNTABLE_STATUS_ID"),
-                        RESPONSIBLE_JOB_ID              = GetString(row, "RESPONSIBLE_JOB_ID"),
-                        ACCOUNTABLE_JOB_ID              = GetString(row, "ACCOUNTABLE_JOB_ID"),
-                        RESPONSIBLE_JOB_NAME            = GetString(row, "JOB_DESCRIP_RESP"),
-                        ACCOUNTABLE_JOB_NAME            = GetString(row, "JOB_DESCRIP_ACC"),
-                        RESPONSIBLE_USER_ID             = GetString(row, "RESPONSIBLE_USER_ID"),
-                        ACCOUNTABLE_USER_ID             = GetString(row, "ACCOUNTABLE_USER_ID"),
-                        PLANNED_START_DATE              = GetDateOnly(row, "PLANNED_START_DATE"),
-                        PLANNED_END_DATE                = GetDateOnly(row, "PLANNED_END_DATE"),
-                        ACTUAL_START_DATE               = GetDateOnly(row, "ACTUAL_START_DATE"),
-                        ACTUAL_END_DATE                 = GetDateOnly(row, "ACTUAL_END_DATE"),
-                        USER_START_DATE                 = GetDateOnly(row, "USER_START_DATE"),
-                        USER_END_DATE                   = GetDateOnly(row, "USER_FINISH_DATE"),
-                        DELIVERABLE_USER_TEXT           = GetString(row, "USER_TEXT"),
-                        ACCOUNTED_STATUS_DESCRIPTION = GetString(row, "ACC_STATUS_DESC"),
-                        DELIVERABLE_STATUS_DESCRIPTION = GetString(row, "DEL_STATUS_DESC"),
-                        DeliverableFiles                = delivFiles,
-                        DeliverableComments             = delivComments,
-                        AccountantComments              = accComments,
-                    }
+                    SALES_ORGANIZATION = GetString(row, "SALES_ORGANIZATION")
                 });
             }
-
+        
             return OperationResult<List<MY_TASKS>>.Ok(_db.DeepCopyList(resultList));
         }
         catch (Exception ex)
@@ -931,6 +978,9 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
         FROM  dbo.TRA_PROJECTS_DELIVERABLE_COMMENTS C
         WHERE C.OPP_LINE_ID =@OppLineId  AND C.STATUS_ID = @GateId AND C.SGATE_ID= @StatusId AND C.DEL_ID=@DelivID AND KEY_PROCESS='DELIV'
         ORDER BY C.SGATE_ID, C.DEL_ID, C.COMMENT_DATE ASC";
+
+       
+                 
 
     private static string SQL_Projects_Deliverable_Comments_Accountant_Per_Deliverable() => @"
           SELECT C.OPP_LINE_ID,

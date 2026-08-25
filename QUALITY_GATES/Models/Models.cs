@@ -74,14 +74,13 @@ public class MY_TASKS
     public string OPP_LINE_ID { get; set; } = string.Empty;
     public string STATUS_ID { get; set; } = string.Empty; 
     public string ACTION_ID { get; set; } = string.Empty;
+    public int DELIVERABLE_ID { get; set; } = 0;
     public Priority OPP_LINE_PRIORITY { get; set; } = Priority.Normal;
     public string OPP_NAME { get; set; } = string.Empty;
     public string OPP_LINE_NAME { get; set; } = string.Empty;
     public string STATUS_NAME { get; set; } = string.Empty; 
     public string ACTION_NAME { get; set; } = string.Empty;
     public string SALES_ORGANIZATION { get; set; } = string.Empty;
-
-    public GATES_DELIVERABLES Deliverable { get; set; } = new();
 
 }
 public class GATES_ACTIONS
