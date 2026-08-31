@@ -7,12 +7,12 @@ using System.Data;
 
 public partial class Class_Projects_Quality_Gates
 {
-    public async Task<Return_SQL_Action> Generate_Next_Default_Gate(string OPP_LINE_ID, string UserRequester="System",CancellationToken cancellationToken = default)
+    public async Task<Return_SQL_Action> Generate_Next_Default_Gate(string OPP_LINE_ID, string USER_ID_WHO_REQUEST = "System",CancellationToken cancellationToken = default)
     {
         // Check if requester user has right to do it
-        if (UserRequester != "System") // System always allowed to generate next gate, no matter the job title
+        if (USER_ID_WHO_REQUEST != "System") // System always allowed to generate next gate, no matter the job title
         {
-            var result = await Get_KeyProcess_Job_title_Restriction("@GATE_GEN ", UserRequester, cancellationToken);
+            var result = await Get_KeyProcess_Job_title_Restriction("@GATE_GEN ", USER_ID_WHO_REQUEST, cancellationToken);
             if (!result.Success)
                 return new Return_SQL_Action { Success = false, Message = result.ErrorMessage };
         }
@@ -26,7 +26,7 @@ public partial class Class_Projects_Quality_Gates
               """;
         var parametersNextGate = new[]
                    {
-                      new SqlParameter("@ModuleId", MODULE_ID),
+                      new SqlParameter("@ModuleId", _MODULE_ID),
                       new SqlParameter("@OppLineId", OPP_LINE_ID),
                    };
         var queryResult = await _db.GetDatatableFromSelectAsync(sqlNextGate, parametersNextGate, cancellationToken: cancellationToken);
@@ -112,13 +112,13 @@ public partial class Class_Projects_Quality_Gates
             // Insert gate status for this project
             var parametersStatus = new[]
             {
-                new SqlParameter("@ModuleId", MODULE_ID),
+                new SqlParameter("@ModuleId", _MODULE_ID),
                 new SqlParameter("@OppLineId", OPP_LINE_ID),
                 new SqlParameter("@StatusId", GateID),
                 new SqlParameter("@GenerationDate", DateTime.UtcNow),
                 new SqlParameter("@GenerationUser", "System"),
                 new SqlParameter("@CurrentStatus", "NOTSTARTED"),
-                new SqlParameter("@User", UserRequester)
+                new SqlParameter("@User", USER_ID_WHO_REQUEST)
             };
             queryResult = await _db.NonQueryDataToSQLServer(GetInsertDefaulGateStatus(), parametersStatus, transaction: tx);
             if (!queryResult.Success)
@@ -291,7 +291,7 @@ public partial class Class_Projects_Quality_Gates
                 // Insert Gate status in TRA_PROJECTS_STATUS
                 var parametersStatus = new[]
                     {
-                      new SqlParameter("@ModuleId",MODULE_ID  ),
+                      new SqlParameter("@ModuleId",_MODULE_ID  ),
                       new SqlParameter("@OppLineId", rowP["OPPORTUNITY_LINE_ID"]),
                       new SqlParameter("@StatusId", GateID),
                       new SqlParameter("@GenerationDate", DateTime.UtcNow),

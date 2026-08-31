@@ -21,7 +21,8 @@ namespace QUALITY_GATES.Classes
                                                                           string STATUS_ID,
                                                                           string SGATE_ID,
                                                                           string DELIVERABLE_ID,
-                                                                          string USER_ID,
+                                                                          string USER_ID_TO_ALLOCATE,
+                                                                          string USER_ID_WHO_REQUEST,
                                                                           DeliverableRolesEstructure Role,
                                                                           CancellationToken cancellationToken = default)
         {
@@ -31,7 +32,7 @@ namespace QUALITY_GATES.Classes
                 DeliverableRolesEstructure.Accountable => "ACC",
                 _ => throw new ArgumentException($"Invalid role: {Role}", nameof(Role))
             };
-            return await AllocateUserIDToDeliverable(OPP_LINE_ID, STATUS_ID, SGATE_ID, DELIVERABLE_ID, USER_ID, Type_Alloc, cancellationToken);
+            return await AllocateUserIDToDeliverable(OPP_LINE_ID, STATUS_ID, SGATE_ID, DELIVERABLE_ID, USER_ID_TO_ALLOCATE, Type_Alloc, cancellationToken);
         }
         /// <summary>
         /// Updates an especific deliverable with ginen USER_ID

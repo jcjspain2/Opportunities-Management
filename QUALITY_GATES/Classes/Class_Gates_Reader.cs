@@ -2,6 +2,7 @@ namespace QUALITY_GATES.Classes;
 
 using GrupoPremo.Intranet.Library.Models;
 using Microsoft.Data.SqlClient;
+using Microsoft.IdentityModel.Tokens;
 using QUALITY_GATES.Data;
 using QUALITY_GATES.Models;
 using System.Collections;
@@ -17,169 +18,7 @@ using static QUALITY_GATES.Tools.Static_Local_Functions;
 
 public partial class Class_Projects_Quality_Gates // Reader provide functions to display in UI current staus of projects and quality gates
 {
-    /// <summary>
-    /// Checks whether the requesting user's job title is authorized for a given key process.
-    /// </summary>
-    /// <param name="KeyProcess">Key process to check restrictions against (e.g. 'GATE_GEN').</param>
-    /// <param name="UserRequester">User ID (samaccountname) of the user making the request.</param>
-    /// <returns>
-    /// The <see cref="USERS_DETAILS"/> of the user if authorized.
-    /// Throws <see cref="InvalidOperationException"/> if the user is not found, has no standard job title,
-    /// no restrictions are defined for the key process, or the user's job title is not in the authorized list.
-    /// </returns>
-    private async Task<OperationResult<bool>> Get_KeyProcess_Job_title_Restriction(string KeyProcess,
-                                                                            string UserRequester = "System",
-                                                                            CancellationToken cancellationToken = default)
-    {
-        // Step 1: resolve user's job title — returns Fail if user not found or has no standard job title
-        var userDetails = await GetUser_ID_Job_Description(UserRequester, cancellationToken);
-        if (!userDetails.Success)
-            return OperationResult<bool>.Fail(userDetails.ErrorMessage);
-
-        // Step 2: retrieve authorized job titles for this key process
-        //TODO: Use MODULE_ID instead Q_GATES
-        const string sql_KEY_PROCESS_CHECK = """
-                  SELECT [JOB_TITLE]
-                  FROM [dbo].[MAS_JOB_TITLES_RESTRICTIONS]
-                  WHERE MODULE_ID = 'Q_GATES' AND KEY_PROCESS = @KeyProcess
-                  """;
-
-        var parameters = new[] { new SqlParameter("@KeyProcess", KeyProcess) };
-
-        var queryResult = await _db.GetDatatableFromSelectAsync(sql_KEY_PROCESS_CHECK, parameters, cancellationToken: cancellationToken);
-
-        if (!queryResult.Success || queryResult.DTResults == null)
-            return OperationResult<bool>.Fail($"Database error retrieving restrictions for key process '{KeyProcess}': {queryResult.Message}");
-
-
-        if (queryResult.DTResults.Rows.Count == 0)
-            return OperationResult<bool>.Fail($"User '{UserRequester}' do not have proper job title to generate next gate.");
-
-
-        // Step 3: check if the user's job title is in the authorized list
-        var authorizedRoles = queryResult.DTResults.Rows
-            .Cast<DataRow>()
-            .Select(r => GetString(r, "JOB_TITLE"))
-            .ToList();
-
-        if (!authorizedRoles.Contains(userDetails.Data.User_Q_GATES_Job_Title_ID, StringComparer.OrdinalIgnoreCase))
-            return OperationResult<bool>.Fail(
-                $"User '{UserRequester}' with job title '{userDetails.Data.User_Q_GATES_Job_Title_ID}' " +
-                $"is not authorized for key process '{KeyProcess}'. " +
-                $"Allowed roles: {string.Join(", ", authorizedRoles)}.");
-
-        return OperationResult<bool>.Ok(true);
-    }
-
-    /// <summary>
-    /// Recovers Job Title of an especific USER_ID if can not recover produces an error.
-    /// </summary>
-    /// <param name="UserRequester">User logged into app that makes request.</param>
-    /// <returns>Return object USER_DETAILS, to display Job description and more details, if not recovered show error</returns>
-    
-    private async Task<OperationResult<USERS_DETAILS>>GetUser_ID_Job_Description(string UserRequester = "System",
-                                                                     CancellationToken cancellationToken = default)
-    {
-        const string sqlUser_Job_title = """
-                  SELECT T1.samaccountname,T1.EmailAddress,T1.GivenName,T1.Surname,
-                         T1.DisplayName,T1.Title,T1.Department,T1.Office,
-                         T2.ManagerEmail,T2.FunManagerEmail,T2.State,JobRole,T2.jobTitle,employeeLevel,
-                         ISNULL(T3.JOB_TITLE_ID,'') JOB_TITLE_ID,ISNULL(T4.JOB_TITLE_DESCRIPTION,'') JOB_TITLE_DESCRIPTION
-                  FROM dbo.MAS_AD_Users T1
-                  LEFT JOIN dbo.MAS_USERS_CADENA T2 on T1.EmailAddress=T2.Email
-                  LEFT JOIN dbo.MAS_JOB_TITLES_CADENA T3 ON T3.JOB_TITLE_CADENA=T2.jobTitle
-                  LEFT JOIN dbo.MAS_JOB_TITLES T4 ON T3.JOB_TITLE_ID=T4.JOB_TITLE_ID
-                  WHERE T1.Enabled=1 and T1.EmailAddress <> '' AND T1.samaccountname=@User_ID
-                  """;
-
-        var parameters = new[] { new SqlParameter("@User_ID", UserRequester) };
-
-        var queryResult = await _db.GetDatatableFromSelectAsync(sqlUser_Job_title, parameters, cancellationToken: cancellationToken);
-
-        if (!queryResult.Success || queryResult.DTResults == null)
-            return OperationResult<USERS_DETAILS>.Fail($"Database error retrieving user '{UserRequester}': {queryResult.Message}");
-
-        if (queryResult.DTResults.Rows.Count == 0)
-            return OperationResult<USERS_DETAILS>.Fail($"User '{UserRequester}' was not found in the system.");
-
-        DataRow row = queryResult.DTResults.Rows[0];
-        string jobTitleDescription = GetString(row, "JOB_TITLE_DESCRIPTION");
-
-        if (string.IsNullOrEmpty(jobTitleDescription))
-            return OperationResult<USERS_DETAILS>.Fail($"User '{UserRequester}' does not have a standard job description assigned. " +
-                $"The job title '{GetString(row, "jobTitle")}' is not mapped to any Quality Gates standard role.");
-
-        return OperationResult<USERS_DETAILS>.Ok(new USERS_DETAILS
-        {
-            UserId                      = GetString(row, "samaccountname"),
-            User_Display_Name           = GetString(row, "DisplayName"),
-            User_Q_GATES_Job_Title      = jobTitleDescription,
-            User_Q_GATES_Job_Title_ID   = GetString(row, "JOB_TITLE_ID"),
-            User_Cadena_JobTitle        = GetString(row, "jobTitle"),
-            UserSite                    = GetString(row, "Office"),
-            UserManager_Mail            = GetString(row, "ManagerEmail"),
-            UserManager_Functional_Mail = GetString(row, "FunManagerEmail")
-        });
-       
-    }
-
-    
-
    
-    /// <summary>
-    /// REturns all users ID that belong to a given job title.
-    /// </summary>
-    /// <param name="UserRequest">User logged into app that makes requests, restriction can be checked.</param>
-    /// <param name="JobTitle">Job Title Target where User Id should be allocated</param>
-    /// <returns>Return object USER_DETAILS, to display and choose</returns>
-    public async Task<OperationResult<List<USERS_DETAILS>>> Get_Users_ID_By_JobTitle(string UserRequest, string JobTitle)
-    {
-        CancellationToken cancellationToken = default;
-        const string SQL_Users_Id_By_JobTitle = """
-                     SELECT T1.samaccountname,T1.EmailAddress,T1.GivenName,T1.Surname,
-                                 T1.DisplayName,T1.Title,T1.Department,T1.Office,
-                                 T2.ManagerEmail,T2.FunManagerEmail,T2.State,JobRole,T2.jobTitle,employeeLevel,
-                                 T3.JOB_TITLE_ID,T4.JOB_TITLE_DESCRIPTION
-                     FROM dbo.MAS_AD_Users T1
-                     LEFT JOIN dbo.MAS_USERS_CADENA T2 on T1.EmailAddress=T2.Email
-                     LEFT JOIN dbo.MAS_JOB_TITLES_CADENA T3 ON T3.JOB_TITLE_CADENA=T2.jobTitle
-                     LEFT JOIN dbo.MAS_JOB_TITLES T4 ON T3.JOB_TITLE_ID=T4.JOB_TITLE_ID
-                     WHERE T1.Enabled=1 and T1.EmailAddress <> '' AND T3.JOB_TITLE_ID=@JOB_TITLE_ID
-                  """;
-        var parameters = new[] { new SqlParameter("@JOB_TITLE_ID", JobTitle) };
-
-        var queryResult = await _db.GetDatatableFromSelectAsync(SQL_Users_Id_By_JobTitle, parameters, cancellationToken: cancellationToken);
-        if (!queryResult.Success || queryResult.DTResults == null)
-            return OperationResult<List<USERS_DETAILS>>.Fail($"Error: {queryResult.Message}");
-
-        if (queryResult.DTResults.Rows.Count == 0)
-            return OperationResult<List<USERS_DETAILS>>.Fail($"No users found for job title '{JobTitle}'.");
-
-        try
-        {
-            var resultList = new List<USERS_DETAILS>();
-            foreach (DataRow row in queryResult.DTResults.Rows)
-            {
-                resultList.Add(new USERS_DETAILS
-                {
-                    UserId                      = GetString(row, "samaccountname"),
-                    User_Display_Name           = GetString(row, "DisplayName"),
-                    User_Q_GATES_Job_Title      = GetString(row, "JOB_TITLE_DESCRIPTION"),
-                    User_Q_GATES_Job_Title_ID   = GetString(row, "JOB_TITLE_ID"),
-                    User_Cadena_JobTitle        = GetString(row, "jobTitle"),
-                    UserSite                    = GetString(row, "Office"),
-                    UserManager_Mail            = GetString(row, "ManagerEmail"),
-                    UserManager_Functional_Mail = GetString(row, "FunManagerEmail"),
-                });
-            }
-            return OperationResult<List<USERS_DETAILS>>.Ok(resultList);
-        }
-        catch (Exception ex)
-        {
-            return OperationResult<List<USERS_DETAILS>>.Fail($"Error: {ex.Message}");
-        }
-    }
-
     private static string SQL_Get_Accountant_Pending_Approval_MyTasks() => @"
             SELECT T1.OPP_LINE_ID,T1.STATUS_ID,T1.SGATE_ID,T1.DELIVERABLE_ID,T1.DELIVERABLE_STATUS_ID,T1.ACCOUNTABLE_STATUS_ID,T1.DELIVERABLE_CREATION_TYPE,
                     T1.DELIVERABLE_NAME,T1.DELIVERABLE_ACEPTANCE_CRITERIA,T1.PLANNED_START_DATE,T1.PLANNED_END_DATE,T1.ACTUAL_START_DATE,T1.ACTUAL_END_DATE,T1.USER_START_DATE,
@@ -208,9 +47,9 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                     ISNULL(T8.GATE_STATUS_DESC,'') AS DEL_STATUS_DESC,ISNULL(T9.GATE_STATUS_DESC,'') AS ACC_STATUS_DESC,T3.Priority,T3.OPPORTUNITY_NAME,T3.OPPORTUNITY_LNE_NAME,
                     T3.SALES_ORGANIZATION
             FROM dbo.TRA_PROJECTS_DELIVERABLES T1
-            JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID='Q_GATES' AND T2.KEY_PROCESS='DEL_RESP' AND T2.GATE_STATUS_ID=T1.DELIVERABLE_STATUS_ID AND T2.IS_FINAL_STATE=0
+            JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID=@ModuleId AND T2.KEY_PROCESS='DEL_RESP' AND T2.GATE_STATUS_ID=T1.DELIVERABLE_STATUS_ID AND T2.IS_FINAL_STATE=0
             JOIN dbo.TRA_PROJECTS T3 ON T3.OPPORTUNITY_LINE_ID=T1.OPP_LINE_ID
-            JOIN dbo.MAS_STATUS T4 ON T4.STATUS_MODULE='Q_GATES' AND T4.STATUS_ID=T1.STATUS_ID
+            JOIN dbo.MAS_STATUS T4 ON T4.STATUS_MODULE=@ModuleId AND T4.STATUS_ID=T1.STATUS_ID
             JOIN dbo.TRA_PROJECTS_GATES T5 ON T5.OPP_LINE_ID=T1.OPP_LINE_ID  AND T5.STATUS_ID=T1.STATUS_ID AND T5.SGATE_ID=T1.SGATE_ID
             LEFT JOIN dbo.MAS_JOB_TITLES T6 ON T6.JOB_TITLE_ID=T1.RESPONSIBLE_JOB_ID
             LEFT JOIN dbo.MAS_JOB_TITLES T7 ON T7.JOB_TITLE_ID=T1.ACCOUNTABLE_JOB_ID
@@ -218,23 +57,24 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
             LEFT JOIN dbo.MAS_GATE_STATUS T9 ON T9.GATE_STATUS_ID=T1.ACCOUNTABLE_STATUS_ID AND T9.KEY_PROCESS='DEL_ACC' 
             WHERE T1.RESPONSIBLE_USER_ID=@UserId";
 
-    private static string SQL_Get_Deliverable() => @"
+    private static string SQL_Get_Deliverable() => @$"
             SELECT T1.OPP_LINE_ID,T1.STATUS_ID,T1.SGATE_ID,T1.DELIVERABLE_ID,T1.DELIVERABLE_STATUS_ID,T1.ACCOUNTABLE_STATUS_ID,T1.DELIVERABLE_CREATION_TYPE,
                     T1.DELIVERABLE_NAME,T1.DELIVERABLE_ACEPTANCE_CRITERIA,T1.PLANNED_START_DATE,T1.PLANNED_END_DATE,T1.ACTUAL_START_DATE,T1.ACTUAL_END_DATE,T1.USER_START_DATE,
                     T1.USER_FINISH_DATE,T1.RESPONSIBLE_JOB_ID,T1.ACCOUNTABLE_JOB_ID,T1.RESPONSIBLE_USER_ID,T1.ACCOUNTABLE_USER_ID,T1.CREATED_BY,T1.CREATED_DATE,T1.MODIFIED_BY,
-                    T1.MODIFIED_DATE,T1.USER_TEXT,T1.NEXT_GATE_TRIGGERS,T1.PATH_TO_SAVE,T5.GATE_TEXT_EXPLANATION,T4.STATUS_DESCRIPTION,
+                    T1.MODIFIED_DATE,T1.USER_TEXT,T1.NEXT_GATE_TRIGGERS,T1.PATH_TO_SAVE,T5.GATE_TEXT_EXPLANATION,T4.STATUS_DESCRIPTION,ISNULL(T3.PDCC_LINK,'') PDCC_LINK,
                     T3.OPPORTUNITY_ID,ISNULL(T6.JOB_TITLE_DESCRIPTION,'') AS JOB_DESCRIP_RESP,ISNULL(T7.JOB_TITLE_DESCRIPTION,'') AS JOB_DESCRIP_ACC,
                     ISNULL(T8.GATE_STATUS_DESC,'') AS DEL_STATUS_DESC,ISNULL(T9.GATE_STATUS_DESC,'') AS ACC_STATUS_DESC,T3.Priority,T3.OPPORTUNITY_NAME,T3.OPPORTUNITY_LNE_NAME,
-                    T3.SALES_ORGANIZATION
+                    T3.SALES_ORGANIZATION,ISNULL(T10.INSTRUCTION_LINK,'') INSTRUCTION_LINK,ISNULL(T10.SAMPLE_LINK,'') SAMPLE_LINK
             FROM dbo.TRA_PROJECTS_DELIVERABLES T1
-            JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID='Q_GATES' AND T2.KEY_PROCESS='DEL_RESP' AND T2.GATE_STATUS_ID=T1.DELIVERABLE_STATUS_ID 
+            JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID=@ModuleId AND T2.KEY_PROCESS='DEL_RESP' AND T2.GATE_STATUS_ID=T1.DELIVERABLE_STATUS_ID 
             JOIN dbo.TRA_PROJECTS T3 ON T3.OPPORTUNITY_LINE_ID=T1.OPP_LINE_ID
-            JOIN dbo.MAS_STATUS T4 ON T4.STATUS_MODULE='Q_GATES' AND T4.STATUS_ID=T1.STATUS_ID
+            JOIN dbo.MAS_STATUS T4 ON T4.STATUS_MODULE=@ModuleId AND T4.STATUS_ID=T1.STATUS_ID
             JOIN dbo.TRA_PROJECTS_GATES T5 ON T5.OPP_LINE_ID=T1.OPP_LINE_ID  AND T5.STATUS_ID=T1.STATUS_ID AND T5.SGATE_ID=T1.SGATE_ID
             LEFT JOIN dbo.MAS_JOB_TITLES T6 ON T6.JOB_TITLE_ID=T1.RESPONSIBLE_JOB_ID
             LEFT JOIN dbo.MAS_JOB_TITLES T7 ON T7.JOB_TITLE_ID=T1.ACCOUNTABLE_JOB_ID
             LEFT JOIN dbo.MAS_GATE_STATUS T8 ON T8.GATE_STATUS_ID=T1.DELIVERABLE_STATUS_ID AND T8.KEY_PROCESS='DEL_RESP'  
             LEFT JOIN dbo.MAS_GATE_STATUS T9 ON T9.GATE_STATUS_ID=T1.ACCOUNTABLE_STATUS_ID AND T9.KEY_PROCESS='DEL_ACC' 
+            LEFT JOIN dbo.MAS_DELIVERABLES T10 ON T10.MODULE_ID=@ModuleId AND T10.STATUS_ID=T1.STATUS_ID AND T10.SGATE_ID=T1.SGATE_ID AND T10.SEQUENCE=T1.DELIVERABLE_ID
             WHERE T1.OPP_LINE_ID=@OppLineId AND T1.STATUS_ID = @GateId AND T1.SGATE_ID = @StatusId AND T1.DELIVERABLE_ID= @DelivID";
 
     public async Task<OperationResult<GATES_DELIVERABLES>> Get_Deliverable(string OPP_LINE_ID, string STATUS_ID, string GATE_ID, int DELIVERABLE_ID)
@@ -256,7 +96,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                     new SqlParameter("@DelivID",    DELIVERABLE_ID)
                 };
         var paramsDeliverable = new[]
-{
+{                   new SqlParameter("@ModuleId",  _MODULE_ID),
                     new SqlParameter("@OppLineId",  OPP_LINE_ID),
                     new SqlParameter("@GateId",    STATUS_ID),
                     new SqlParameter("@StatusId",  GATE_ID),
@@ -331,6 +171,8 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                     ACCOUNTABLE_JOB_NAME = GetString(row, "JOB_DESCRIP_ACC"),
                     RESPONSIBLE_USER_ID = GetString(row, "RESPONSIBLE_USER_ID"),
                     ACCOUNTABLE_USER_ID = GetString(row, "ACCOUNTABLE_USER_ID"),
+                    RESPONSIBLE_USER_NAME="",
+                    ACCOUNTABLE_USER_NAME="",
                     PLANNED_START_DATE = GetDateOnly(row, "PLANNED_START_DATE"),
                     PLANNED_END_DATE = GetDateOnly(row, "PLANNED_END_DATE"),
                     ACTUAL_START_DATE = GetDateOnly(row, "ACTUAL_START_DATE"),
@@ -340,6 +182,9 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                     DELIVERABLE_USER_TEXT = GetString(row, "USER_TEXT"),
                     ACCOUNTED_STATUS_DESCRIPTION = GetString(row, "ACC_STATUS_DESC"),
                     DELIVERABLE_STATUS_DESCRIPTION = GetString(row, "DEL_STATUS_DESC"),
+                    LINK_TO_INSTRUCTION_TO_FOLLOW = GetString(row, "INSTRUCTION_LINK"),
+                    LINK_TO_TEMPLATE = GetString(row, "SAMPLE_LINK"),
+                    LINK_TO_PDCC = GetString(row, "PDCC_LINK"),
                     DeliverableFiles = delivFiles,
                     DeliverableComments = delivComments,
                     AccountantComments = accComments
@@ -360,7 +205,8 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
        
     public async Task<OperationResult<List<MY_TASKS>>> Get_MyTasks_Pending(string UserId, DeliverableRolesEstructure Role)
     {
-        var paramsAcc = new[] { new SqlParameter("@UserId", UserId) };
+        var paramsAcc = new[] { new SqlParameter("@ModuleId", _MODULE_ID), 
+                                new SqlParameter("@UserId", UserId) };
         CancellationToken cancellationToken = default;
         string SqlString= string.Empty;
         switch(Role)
@@ -532,7 +378,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
 
       
                 var parametersNextGate = new[]
-                      { new SqlParameter("@ModuleId", MODULE_ID),
+                      { new SqlParameter("@ModuleId", _MODULE_ID),
                         new SqlParameter("@OppLineId", GetString(row, "OPPORTUNITY_LINE_ID"))};
                 var queryResultSt = await _db.GetDatatableFromSelectAsync(sqlNextGate, parametersNextGate, cancellationToken: cancellationToken);
                 if (!queryResultSt.Success || queryResult.DTResults == null)
@@ -633,9 +479,11 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
 
     private string SQL_TRA_PROJECTS_DETAIL()
     {
+       
         return $@"SELECT OPPORTUNITY_ID,OPPORTUNITY_LINE_ID,OPPORTUNITY_NAME,OPPORTUNITY_LNE_NAME,MATNR,DESCRIPTION,SAP_CUSTOMER,
                       CUST_NAME,SALES_ORGANIZATION,PRODUCT_CATEGORY,BUSINESS_UNIT,CURRENT_QG_STATUS,RELEASED_DATE,
-                      PIECES_1Y,PIECES_2Y,PIECES_3Y,PIECES_4Y,PRICE_1Y,PRICE_2Y,PRICE_3Y,PRICE_4Y,PRICE_CUR,RATE_VS_EUR,SOP,OWNER_SF
+                      PIECES_1Y,PIECES_2Y,PIECES_3Y,PIECES_4Y,PRICE_1Y,PRICE_2Y,PRICE_3Y,PRICE_4Y,PRICE_CUR,RATE_VS_EUR,SOP,OWNER_SF,
+                      SAMPLES_CENTER,DESIGN_CENTER,MANUFACTURE_CENTER,PDCC_LINK,SF_LINK
                FROM dbo.TRA_PROJECTS T1
                WHERE CURRENT_QG_STATUS IN ('PCA','FEAS') AND [IsGeneratedInitial]=1 AND OPPORTUNITY_LINE_ID= @OppLineId";
     //TODO:IMPROVE HARDCODING QUALITY GATES FILTE
@@ -674,7 +522,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                  LEFT JOIN dbo.TRA_PROJECTS_DELIVERABLES T2 ON T2.OPP_LINE_ID=OPPORTUNITY_LINE_ID
                  LEFT JOIN dbo.MAS_GATE_STATUS T3 ON T3.GATE_STATUS_ID=T2.DELIVERABLE_STATUS_ID AND T3.MODULE_ID='QGATES' AND T3.KEY_PROCESS='DEL_RESP'
                  LEFT JOIN dbo.MAS_GATE_STATUS T4 ON T4.GATE_STATUS_ID=T2.ACCOUNTABLE_STATUS_ID AND T4.MODULE_ID='QGATES' AND T4.KEY_PROCESS='DEL_ACC'   
-                 WHERE CURRENT_QG_STATUS IN ('PCA', 'FEAS') AND [IsGeneratedInitial]=1
+                 WHERE CURRENT_QG_STATUS IN ('PCA', 'FEAS') AND [IsGeneratedInitial]=1 AND T1.IsLost_SF=0
                  GROUP BY OPPORTUNITY_ID,OPPORTUNITY_LINE_ID,OPPORTUNITY_NAME,OPPORTUNITY_LNE_NAME,MATNR,DESCRIPTION,SAP_CUSTOMER,
                           CUST_NAME,SALES_ORGANIZATION,PRODUCT_CATEGORY,BUSINESS_UNIT,CURRENT_QG_STATUS,RELEASED_DATE,
                           PIECES_1Y,PIECES_2Y,PIECES_3Y,PIECES_4Y,PRICE_1Y,PRICE_2Y,PRICE_3Y,PRICE_4Y,PRICE_CUR,RATE_VS_EUR,SOP,OWNER_SF,PARENT_NAME,SF_LINK,Priority";
@@ -694,7 +542,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
         try
         {
             CancellationToken cancellationToken = default;
-
+             string _PDCC_LINK=string.Empty;
             // 1 — Cabecera del proyecto
             var paramsPro = new[] { new SqlParameter("@OppLineId", Opp_Line_ID) };
             var queryResult = await _db.GetDatatableFromSelectAsync(SQL_TRA_PROJECTS_DETAIL(), paramsPro, cancellationToken: cancellationToken);
@@ -713,6 +561,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                     OPP_LINE_NAME   = GetString(row, "OPPORTUNITY_LNE_NAME"),
                     CURRENT_GATE_ID = GetString(row, "CURRENT_QG_STATUS"),
                 };
+                _PDCC_LINK = GetString(row, "PDCC_LINK");
             }
             // 2.- Retry all files related to this project in one query, grouped in memory
             var FilesOfProject = await Get_DMS_FilesPerproject(Opp_Line_ID);
@@ -908,6 +757,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                         ACCOUNTABLE_USER_NAME = String.Empty,  // We need to implement this
                         LINK_TO_TEMPLATE = GetString(rowDel, "SAMPLE_LINK"),
                         LINK_TO_INSTRUCTION_TO_FOLLOW = GetString(rowDel, "INSTRUCTION_LINK"),
+                        LINK_TO_PDCC = _PDCC_LINK,
                         DELIVERABLE_USER_TEXT = GetString(rowDel, "USER_TEXT"),
                         DeliverableComments = delivComments,
                         AccountantComments= accComments,

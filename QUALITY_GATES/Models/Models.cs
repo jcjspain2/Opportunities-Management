@@ -44,6 +44,7 @@ public class PROJECT_DETAIL
     public string OPP_LINE_NAME { get; set; } = string.Empty;
     public string CURRENT_GATE_ID { get; set; } = string.Empty;
     public string PATH_TO_SAVE_FILES { get; set; } = string.Empty;
+    public string LINK_TO_PDCC { get; set; } = string.Empty;
     public List<GATES_ACTIONS> List_Actions { get; set; } = new();
 }
 
@@ -142,6 +143,7 @@ public class GATES_DELIVERABLES
     public string LINK_TO_TEMPLATE { get; set; } = string.Empty;
     public string LINK_TO_INSTRUCTION_TO_FOLLOW { get; set; } = string.Empty;
     public string DELIVERABLE_USER_TEXT { get; set; } = string.Empty;
+    public string LINK_TO_PDCC { get; set; } = string.Empty;
 
     public List<DELIVERABLE_FILE> DeliverableFiles { get; set; } = new();
     public List<DELIVERABLES_COMMENTS> DeliverableComments { get; set; } = new();
@@ -225,7 +227,16 @@ public enum DeliverableRolesEstructure
     Responsible = 1,
     Accountable = 2
 }
-
+public enum Module_ID
+{
+    Q_GATES = 1,
+    Q_GATES_PR = 2
+}
+public enum Enviroment
+{
+    PRODUCTION = 1,
+    TEST = 2
+}
 public static class PriorityExtensions
 {
     public static Priority FromValue(int value)

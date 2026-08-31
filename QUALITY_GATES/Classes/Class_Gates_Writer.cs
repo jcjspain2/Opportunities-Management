@@ -156,13 +156,13 @@ namespace QUALITY_GATES.Classes
 
         public async Task<OperationResult<bool>> UpdateProjectPriority(string oppLineId,
                                                                        Priority Project_Priority,
-                                                                       string userId,
+                                                                       string   USER_ID_WHO_REQUEST,
                                                                        CancellationToken cancellationToken = default)
         {
             // Check if the user has the required job title to perform this action
-            if (userId != "System") // System always allowed to generate next gate, no matter the job title
+            if (USER_ID_WHO_REQUEST != "System") // System always allowed to generate next gate, no matter the job title
             {
-                var resultJob = await Get_KeyProcess_Job_title_Restriction("@PRIORITY", userId, cancellationToken);
+                var resultJob = await Get_KeyProcess_Job_title_Restriction("@PRIORITY", USER_ID_WHO_REQUEST, cancellationToken);
                 if (!resultJob.Success)
                     return OperationResult<bool>.Fail($"Error: {resultJob.ErrorMessage}");
           
@@ -206,7 +206,7 @@ namespace QUALITY_GATES.Classes
                                                                              int delId,
                                                                              DeliverableRolesEstructure RoleDeliverable,
                                                                              string STATUS_ID_TO_UPDATE,
-                                                                             string userId,
+                                                                             string USER_ID_WHO_REQUEST,
                                                                              CancellationToken cancellationToken = default)
         {
             var keyProcess = RoleDeliverable == DeliverableRolesEstructure.Responsible ? "DEL_RESP" : "DEL_ACC";
@@ -266,7 +266,7 @@ namespace QUALITY_GATES.Classes
                 new SqlParameter("@StatusId",         statusId),
                 new SqlParameter("@SgateId",          sgateId),
                 new SqlParameter("@DelId",            delId),
-                new SqlParameter("@UserId",           userId)
+                new SqlParameter("@UserId",           USER_ID_WHO_REQUEST)
             };
 
             await using var conn = await _db.CreateOpenConnectionAsync(cancellationToken: cancellationToken);
@@ -293,7 +293,7 @@ namespace QUALITY_GATES.Classes
                 new SqlParameter("@StatusId",         statusId),
                 new SqlParameter("@SgateId",          sgateId),
                 new SqlParameter("@DelId",            delId),
-                new SqlParameter("@UserId",           userId)
+                new SqlParameter("@UserId",           USER_ID_WHO_REQUEST)
             };
 
                 var accResult = await _db.NonQueryDataToSQLServer(
@@ -310,7 +310,7 @@ namespace QUALITY_GATES.Classes
                 new SqlParameter("@StatusIdToUpdate", "IN_PROGRES"),
                 new SqlParameter("@OppLineId",        oppLineId),
                 new SqlParameter("@StatusId",         statusId),
-                new SqlParameter("@UserId",           userId)
+                new SqlParameter("@UserId",           USER_ID_WHO_REQUEST)
             };
                 var StatusResult = await _db.NonQueryDataToSQLServer(
                        SQL_Update_Status(), ParamsStatus(), transaction: tx, cancellationToken: cancellationToken);
