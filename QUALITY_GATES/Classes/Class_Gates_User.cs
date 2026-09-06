@@ -147,7 +147,57 @@ public partial class Class_Projects_Quality_Gates
 
     }
 
+    /// <summary>
+    /// REturns all users ID .
+    /// </summary>
+    /// <param name="UserRequest">User logged into app that makes requests, restriction can be checked.</param>
+    /// <returns>Return object USER_DETAILS, to display and choose</returns>
+    public async Task<OperationResult<List<USERS_DETAILS>>> Get_Users_ID_All(string UserRequest)
+    {
+        CancellationToken cancellationToken = default;
+        const string SQL_Users_Id_By_JobTitle = """
+                     SELECT T1.samaccountname,T1.EmailAddress,T1.GivenName,T1.Surname,
+                                 T1.DisplayName,T1.Title,T1.Department,T1.Office,
+                                 T2.ManagerEmail,T2.FunManagerEmail,T2.State,JobRole,T2.jobTitle,employeeLevel,
+                                 T3.JOB_TITLE_ID,T4.JOB_TITLE_DESCRIPTION
+                     FROM dbo.MAS_AD_Users T1
+                     LEFT JOIN dbo.MAS_USERS_CADENA T2 on T1.EmailAddress=T2.Email
+                     LEFT JOIN dbo.MAS_JOB_TITLES_CADENA T3 ON T3.JOB_TITLE_CADENA=T2.jobTitle
+                     LEFT JOIN dbo.MAS_JOB_TITLES T4 ON T3.JOB_TITLE_ID=T4.JOB_TITLE_ID
+                     WHERE T1.Enabled=1 and T1.EmailAddress <> ''
+                  """;
+        var queryResult = await _db.GetDatatableFromSelectAsync(SQL_Users_Id_By_JobTitle,null, cancellationToken: cancellationToken);
+        if (!queryResult.Success || queryResult.DTResults == null)
+            return OperationResult<List<USERS_DETAILS>>.Fail($"Error: {queryResult.Message}");
 
+        if (queryResult.DTResults.Rows.Count == 0)
+            return OperationResult<List<USERS_DETAILS>>.Fail($"No users found.");
+
+        try
+        {
+            var resultList = new List<USERS_DETAILS>();
+            foreach (DataRow row in queryResult.DTResults.Rows)
+            {
+                resultList.Add(new USERS_DETAILS
+                {
+                    UserId = GetString(row, "samaccountname"),
+                    User_Display_Name = GetString(row, "DisplayName"),
+                    User_Q_GATES_Job_Title = GetString(row, "JOB_TITLE_DESCRIPTION"),
+                    User_Q_GATES_Job_Title_ID = GetString(row, "JOB_TITLE_ID"),
+                    User_Cadena_JobTitle = GetString(row, "jobTitle"),
+                    UserSite = GetString(row, "Office"),
+                    UserManager_Mail = GetString(row, "ManagerEmail"),
+                    UserManager_Functional_Mail = GetString(row, "FunManagerEmail"),
+                });
+            }
+            return OperationResult<List<USERS_DETAILS>>.Ok(resultList);
+        }
+        catch (Exception ex)
+        {
+            return OperationResult<List<USERS_DETAILS>>.Fail($"Error: {ex.Message}");
+        }
+       
+    }
 
 
     /// <summary>

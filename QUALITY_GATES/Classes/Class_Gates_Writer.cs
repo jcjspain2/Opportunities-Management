@@ -15,8 +15,126 @@ namespace QUALITY_GATES.Classes
 {
     public partial class Class_Projects_Quality_Gates // Reader provide functions to display in UI current staus of projects and quality gates
     {
-       
 
+        /// <summary>
+        /// Adds a Users for working wiyh my Tasks as collaborative
+        /// </summary>
+        /// <param name="oppLineId">Unique Sales Forve ID of the project to display data</param>
+        /// <param name="statusId">Status ID deliverable belongs to example FEAS</param>
+        /// <param name="sgateId">Gate action ID, deliverable belongs to example FEAS_1</param>
+        /// <param name="delId">Delivery ID, where cooment will be allocated </param>
+        /// <param name="User_Who_Request">User Id who makes request for this function should be responsible of the deliverable</param>
+        /// <param name="ListUsersToCollaborate">List Of Users to Collaborate</param>
+        /// <returns>True adds , false error </returns>
+        public async Task<OperationResult<bool>> AddCollaborator_To_Deliverable(string oppLineId,
+                                                                       string statusId,
+                                                                       string sgateId,
+                                                                       int delId,
+                                                                       string User_Who_Request,
+                                                                       List<USERS_COLLABORATIVE> ListUsersToCollaborate,
+                                                                       CancellationToken cancellationToken = default)
+
+        {
+            foreach (var user in ListUsersToCollaborate)
+            {
+                if (string.IsNullOrEmpty(user.UserId) || string.IsNullOrEmpty(user.Responsible_Task_Comment))
+                    return OperationResult<bool>.Fail($"User '{user.UserId}' has empty required fields.");
+            }
+
+            var existingResult = await _db.GetDatatableFromSelectAsync(
+                SQL_Get_Existing_Collaborators(),
+                new[]
+                {
+                    new SqlParameter("@OppLineId", oppLineId),
+                    new SqlParameter("@StatusId",  statusId),
+                    new SqlParameter("@SgateId",   sgateId),
+                    new SqlParameter("@DelId",     delId)
+                },
+                cancellationToken: cancellationToken);
+
+            if (!existingResult.Success || existingResult.DTResults == null)
+                return OperationResult<bool>.Fail($"Error checking existing collaborators: {existingResult.Message}");
+
+            var existingUserIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (DataRow row in existingResult.DTResults.Rows)
+                existingUserIds.Add(GetString(row, "User_ID"));
+
+            foreach (var user in ListUsersToCollaborate)
+            {
+                if (existingUserIds.Contains(user.UserId))
+                    return OperationResult<bool>.Fail($"User '{user.UserId}' is already a collaborator for this deliverable.");
+            }
+
+            var userMails = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var user in ListUsersToCollaborate)
+            {
+                var mailResult = await _db.GetDatatableFromSelectAsync(
+                    SQL_Get_User_Mail_By_SamAccount(),
+                    new[] { new SqlParameter("@UserId", user.UserId) },
+                    cancellationToken: cancellationToken);
+
+                if (!mailResult.Success || mailResult.DTResults == null || mailResult.DTResults.Rows.Count == 0)
+                    return OperationResult<bool>.Fail($"User '{user.UserId}' not found in AD directory.");
+
+                userMails[user.UserId] = GetString(mailResult.DTResults.Rows[0], "EmailAddress");
+            }
+
+            await using var conn = await _db.CreateOpenConnectionAsync(cancellationToken: cancellationToken);
+            await using var tx = conn.BeginTransaction();
+            try
+            {
+                foreach (var user in ListUsersToCollaborate)
+                {
+                    var parameters = new[]
+                    {
+                        new SqlParameter("@OppLineId",   oppLineId),
+                        new SqlParameter("@StatusId",    statusId),
+                        new SqlParameter("@SgateId",     sgateId),
+                        new SqlParameter("@DelId",       delId),
+                        new SqlParameter("@UserId",      user.UserId),
+                        new SqlParameter("@UserMail",    userMails[user.UserId]),
+                        new SqlParameter("@RespComment", user.Responsible_Task_Comment),
+                        new SqlParameter("@GeneratedBy", User_Who_Request)
+                    };
+
+                    var insertResult = await _db.NonQueryDataToSQLServer(
+                        SQL_Insert_Collaborator(), parameters, transaction: tx, cancellationToken: cancellationToken);
+
+                    if (!insertResult.Success)
+                    {
+                        tx.Rollback();
+                        return OperationResult<bool>.Fail($"Error inserting collaborator '{user.UserId}': {insertResult.Message}");
+                    }
+                }
+
+                tx.Commit();
+                return OperationResult<bool>.Ok(true);
+            }
+            catch
+            {
+                tx.Rollback();
+                throw;
+            }
+        }
+
+        private static string SQL_Get_Existing_Collaborators() => @"
+            SELECT User_ID
+            FROM   dbo.TRA_PROJECTS_DELIVERABLE_COOPERATION
+            WHERE  OPP_LINE_ID    = @OppLineId
+              AND  STATUS_ID      = @StatusId
+              AND  SGATE_ID       = @SgateId
+              AND  DELIVERABLE_ID = @DelId";
+
+        private static string SQL_Get_User_Mail_By_SamAccount() => @"
+            SELECT EmailAddress
+            FROM   dbo.MAS_AD_Users
+            WHERE  samaccountname = @UserId";
+
+        private static string SQL_Insert_Collaborator() => @"
+            INSERT INTO dbo.TRA_PROJECTS_DELIVERABLE_COOPERATION
+                  (OPP_LINE_ID, STATUS_ID, SGATE_ID, DELIVERABLE_ID, User_ID, User_Mail, RESP_COMMENT, Generataed_At, Generated_By)
+            VALUES
+                  (@OppLineId, @StatusId, @SgateId, @DelId, @UserId, @UserMail, @RespComment, SYSDATETIME(), @GeneratedBy)";
         private static string SQL_Validate_Deliverable_Status() => @"
             SELECT COUNT(1)
             FROM   dbo.MAS_GATE_STATUS

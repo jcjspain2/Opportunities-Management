@@ -77,11 +77,35 @@ public class MY_TASKS
     public string ACTION_ID { get; set; } = string.Empty;
     public int DELIVERABLE_ID { get; set; } = 0;
     public Priority OPP_LINE_PRIORITY { get; set; } = Priority.Normal;
+    public StatusState CurrentStatus { get; set; } = StatusState.NotStarted;
     public string OPP_NAME { get; set; } = string.Empty;
     public string OPP_LINE_NAME { get; set; } = string.Empty;
     public string STATUS_NAME { get; set; } = string.Empty; 
     public string ACTION_NAME { get; set; } = string.Empty;
+    public string DELIVERABLE_DESCRIPTION { get; set; } = string.Empty;
     public string SALES_ORGANIZATION { get; set; } = string.Empty;
+
+}
+public class TASKS_PENDING_TO_ALLOCATE
+{
+    public string OPP_ID { get; set; } = string.Empty;
+    public string OPP_LINE_ID { get; set; } = string.Empty;
+    public string STATUS_ID { get; set; } = string.Empty;
+    public string ACTION_ID { get; set; } = string.Empty;
+    public int DELIVERABLE_ID { get; set; } = 0;
+    public Priority OPP_LINE_PRIORITY { get; set; } = Priority.Normal;
+    public StatusState CurrentStatus { get; set; } = StatusState.NotStarted;
+    public string OPP_NAME { get; set; } = string.Empty;
+    public string OPP_LINE_NAME { get; set; } = string.Empty;
+    public string STATUS_NAME { get; set; } = string.Empty;
+    public string ACTION_NAME { get; set; } = string.Empty;
+    public string DELIVERABLE_DESCRIPTION { get; set; } = string.Empty;
+    public string SALES_ORGANIZATION { get; set; } = string.Empty;
+    public string BUSINESS_UNIT { get; set; } = string.Empty;
+    public string PRODUCT_CATEGORY { get; set; } = string.Empty;
+    public string OWNER { get; set; } = string.Empty;
+    public string JOB_TITLE_ID { get; set; } = string.Empty;
+    public string JOB_TITLE_DESCRIPTION { get; set; } = string.Empty;
 
 }
 public class GATES_ACTIONS
@@ -214,6 +238,12 @@ public class USERS_DETAILS
     public string UserManager_Functional_Mail { get; set; } = string.Empty;
 
 }
+public class USERS_COLLABORATIVE
+{
+    public string UserId { get; set; } = string.Empty;
+    public string Responsible_Task_Comment { get; set; } = string.Empty;
+    
+}
 public enum Priority
 {
     High = 1,
@@ -221,11 +251,20 @@ public enum Priority
     Normal = 3,
     Low = 4
 }
+public enum StatusState
+{
+    NotStarted = 1,
+    InProgress = 2,
+    Pendingreview = 3,
+    Completed = 4,
+    Rejected = 5
+}
 
 public enum DeliverableRolesEstructure
 {
     Responsible = 1,
-    Accountable = 2
+    Accountable = 2,
+    Collaborator = 3
 }
 public enum Module_ID
 {

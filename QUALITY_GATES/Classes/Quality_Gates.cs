@@ -12,11 +12,23 @@ public partial class Class_Projects_Quality_Gates
     static private  string _MODULE_ID ;
     private  string _ENVIRONMENT ;
 
-    public Class_Projects_Quality_Gates(IDbConnectionFactory db, IServiceProvider serviceProvider,Module_ID CurrentModule = Module_ID.Q_GATES, Enviroment CurrentEnviroment = Enviroment.PRODUCTION)
+    public Class_Projects_Quality_Gates(IDbConnectionFactory db, IServiceProvider serviceProvider, Module_ID CurrentModule = Module_ID.Q_GATES, Enviroment CurrentEnviroment = Enviroment.PRODUCTION)
     {
         _db = db;
-       _MODULE_ID = CurrentModule.ToString().Trim(); // defines wich module ID we are going to work with
-       _ENVIRONMENT = CurrentEnviroment.ToString().Trim(); // defines wich environment we are going to work with
+        _MODULE_ID = CurrentModule.ToString().Trim();
+        _ENVIRONMENT = CurrentEnviroment.ToString().Trim();
         //_dms = serviceProvider.GetService<IDmsFlowService>();
+    }
+
+    public static async Task<Class_Projects_Quality_Gates> CreateAsync(
+        IDbConnectionFactory db,
+        IServiceProvider serviceProvider,
+        Module_ID currentModule = Module_ID.Q_GATES,
+        Enviroment currentEnviroment = Enviroment.PRODUCTION,
+        CancellationToken cancellationToken = default)
+    {
+        var instance = new Class_Projects_Quality_Gates(db, serviceProvider, currentModule, currentEnviroment);
+        await instance.Generate_Default_Gate_FromInitial("PCA", cancellationToken: cancellationToken);
+        return instance;
     }
 }

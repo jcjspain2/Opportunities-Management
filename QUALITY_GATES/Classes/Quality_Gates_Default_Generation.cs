@@ -206,12 +206,9 @@ public partial class Class_Projects_Quality_Gates
 
         return queryResult;
     }
-    public async Task<Return_SQL_Action> Generate_Default_Gate_FromInitial(
-        string GateID,
-        CancellationToken cancellationToken = default)
+    public async Task<Return_SQL_Action> Generate_Default_Gate_FromInitial(string GateID,
+                                                                          CancellationToken cancellationToken = default)
     {
-      
-
         const string sqlProjects = """
             SELECT
                 OPPORTUNITY_ID,
@@ -246,8 +243,6 @@ public partial class Class_Projects_Quality_Gates
                    DELIVERABLE_TYPE,
                    DELIVERABLE_ACTION,
                    DELIVERABLE_ACEPTANCE_CRITERIA,
-                   DELIVERABLE_LINK,
-                   DELIVERABLE_TEXT_USER,
                    INSTRUCTION_LINK,
                    SAMPLE_LINK,
                    DEFAULT_LEAD_TIME_DAYS,
@@ -258,7 +253,8 @@ public partial class Class_Projects_Quality_Gates
             FROM dbo.MAS_DELIVERABLES
             WHERE STATUS_ID= @GateID  AND (IsDeleted IS NULL OR IsDeleted = 0)         
             """;
-
+        
+       
         // First recover all projects pending to process.
         var queryResult = await _db.GetDatatableFromSelectAsync(sqlProjects, null, cancellationToken: cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
@@ -266,7 +262,8 @@ public partial class Class_Projects_Quality_Gates
         if (queryResult.Success & queryResult.RecordsAffected == 0)
         { return queryResult; } // No records to process
         DataTable dtProjects = queryResult.DTResults;
-       // Second recover default actions
+        
+        // Second recover default actions
         var parametersActGate = new[]
                    {new SqlParameter("@GateID", GateID) };
         queryResult = await _db.GetDatatableFromSelectAsync(sqlActions, parametersActGate, cancellationToken: cancellationToken);
@@ -288,6 +285,13 @@ public partial class Class_Projects_Quality_Gates
         {
             foreach (DataRow rowP in dtProjects.Rows) // Iterate for each new project generate default actions + Deliverables
             {
+                //If gate PCA then we have to create deliverables in an especicic address
+           
+                string _FolderToSave = string.Empty;
+                if (GateID == "PCA")
+                {
+                    _FolderToSave = "https://grupopremo.sharepoint.com/sites/GlobalProjectManagement/OpportunitiesSFDocs/" + rowP["OPPORTUNITY_LINE_ID"].ToString();
+                }
                 // Insert Gate status in TRA_PROJECTS_STATUS
                 var parametersStatus = new[]
                     {
@@ -346,8 +350,8 @@ public partial class Class_Projects_Quality_Gates
                       new SqlParameter("@ACC_Job_Id", rowD["ACCOUNTABLE_JOB_TITLE"].ToString()),
                       new SqlParameter("@RESP_User_Id", ""),
                       new SqlParameter("@ACC_User_Id", ""),
-                      new SqlParameter("@User", "System")
-
+                      new SqlParameter("@User", "System"),
+                      new SqlParameter("@FolderToSave",  _FolderToSave )
                     };
                     queryResult = await _db.NonQueryDataToSQLServer(GetInsertDefaultGateDeliverables(GateID), parametersDel, transaction: tx);
                     if (!queryResult.Success)
@@ -483,7 +487,8 @@ public partial class Class_Projects_Quality_Gates
                              ,[CREATED_BY]
                              ,[CREATED_DATE]
                              ,[MODIFIED_BY]
-                             ,[MODIFIED_DATE])
+                             ,[MODIFIED_DATE]
+                             ,PATH_TO_SAVE)
                    VALUES(
                           @OppLineId,
                           @StatusId,
@@ -507,7 +512,8 @@ public partial class Class_Projects_Quality_Gates
                           @User,
                           GETDATE(),    --CREATED_DATE
                           @User,        --MODIIFIED_BY
-                          GETDATE());   --MODIFIED_DATE";
+                          GETDATE(),   --MODIFIED_DATE
+                          @FolderToSave)"; 
     }
 }
  

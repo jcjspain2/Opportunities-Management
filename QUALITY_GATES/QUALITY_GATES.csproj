@@ -7,7 +7,7 @@
 
     <!-- Identidad del paquete -->
     <PackageId>QualityGates</PackageId>
-    <Version>1.0.29</Version>
+    <Version>1.0.32</Version>
     <Authors>Grupo Premo</Authors>
     <Description>Business logic and data access library for Quality Gates SRM</Description>
 
