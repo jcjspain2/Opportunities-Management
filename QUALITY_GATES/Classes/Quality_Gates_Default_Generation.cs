@@ -49,13 +49,13 @@ public partial class Class_Projects_Quality_Gates
             return new Return_SQL_Action
             {
                 Success = false,
-                Message = "No existen estados disponibles para el proyecto.",
+                Message = "There are no states available for the project, all possible status are already generated",
                 RecordsAffected = 0
             };
         }
 
         // Column 0 is T1.STATUS_ID (the master status, not the transactional one)
-        string GateID = nextGateRow[0].ToString()!;
+        string GateID = nextGateRow[0].ToString()!.Trim();
 
         const string sqlActions = """
             SELECT MODULE_ID,
@@ -109,15 +109,21 @@ public partial class Class_Projects_Quality_Gates
         await using var tx = conn.BeginTransaction();
         try
         {
-            // Insert gate status for this project
+            // Default Current for FEASIBILITY Status  WAIT_GPM  untill GPM will be created then NOTSTARTED
+            String _Default_Status = "NOTSTARTED";
+            if (GateID == "FEAS")
+            {
+                _Default_Status = "WAIT_GPM";
+            }
+
             var parametersStatus = new[]
             {
                 new SqlParameter("@ModuleId", _MODULE_ID),
                 new SqlParameter("@OppLineId", OPP_LINE_ID),
                 new SqlParameter("@StatusId", GateID),
                 new SqlParameter("@GenerationDate", DateTime.UtcNow),
-                new SqlParameter("@GenerationUser", "System"),
-                new SqlParameter("@CurrentStatus", "NOTSTARTED"),
+                new SqlParameter("@GenerationUser", USER_ID_WHO_REQUEST),
+                new SqlParameter("@CurrentStatus", _Default_Status),
                 new SqlParameter("@User", USER_ID_WHO_REQUEST)
             };
             queryResult = await _db.NonQueryDataToSQLServer(GetInsertDefaulGateStatus(), parametersStatus, transaction: tx);
@@ -136,7 +142,7 @@ public partial class Class_Projects_Quality_Gates
                     new SqlParameter("@SGateId", rowA["SGATE_ID"]),
                     new SqlParameter("@Sequence", rowA["SEQUENCE"]),
                     new SqlParameter("@GateTarget", rowA["GATE_TARGET"]),
-                    new SqlParameter("@User", "System"),
+                    new SqlParameter("@User", USER_ID_WHO_REQUEST ),
                     new SqlParameter("@PlanStart", DateTime.Now)
                 };
                 queryResult = await _db.NonQueryDataToSQLServer(GetInsertDefaulGateActions(GateID), parametersAct, transaction: tx);
@@ -167,7 +173,8 @@ public partial class Class_Projects_Quality_Gates
                     new SqlParameter("@ACC_Job_Id", rowD["ACCOUNTABLE_JOB_TITLE"].ToString()),
                     new SqlParameter("@RESP_User_Id", ""),
                     new SqlParameter("@ACC_User_Id", ""),
-                    new SqlParameter("@User", "System")
+                    new SqlParameter("@User", USER_ID_WHO_REQUEST ),
+                    new SqlParameter("@FolderToSave", "")
                 };
                 queryResult = await _db.NonQueryDataToSQLServer(GetInsertDefaultGateDeliverables(GateID), parametersDel, transaction: tx);
                 if (!queryResult.Success)

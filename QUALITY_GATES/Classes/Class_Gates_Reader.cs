@@ -81,7 +81,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                     T1.MODIFIED_DATE,T1.USER_TEXT,T1.NEXT_GATE_TRIGGERS,T1.PATH_TO_SAVE,T5.GATE_TEXT_EXPLANATION,T4.STATUS_DESCRIPTION,
                     T3.OPPORTUNITY_ID,ISNULL(T6.JOB_TITLE_DESCRIPTION,'') AS JOB_DESCRIP_RESP,ISNULL(T7.JOB_TITLE_DESCRIPTION,'') AS JOB_DESCRIP_ACC,
                     ISNULL(T8.GATE_STATUS_DESC,'') AS DEL_STATUS_DESC,ISNULL(T9.GATE_STATUS_DESC,'') AS ACC_STATUS_DESC,T3.Priority,T3.OPPORTUNITY_NAME,T3.OPPORTUNITY_LNE_NAME,
-                    T3.SALES_ORGANIZATION,T3.OWNER_SF,T3.PRODUCT_CATEGORY,T3.BUSINESS_UNIT
+                    T3.SALES_ORGANIZATION,T3.OWNER_SF,T3.PRODUCT_CATEGORY,T3.BUSINESS_UNIT,'' AS COMMENT
             FROM dbo.TRA_PROJECTS_DELIVERABLES T1
             JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID='Q_GATES' AND T2.KEY_PROCESS='DEL_ACC' AND T2.GATE_STATUS_ID=T1.ACCOUNTABLE_STATUS_ID AND T2.IS_PENDING_REVIEW=1
             JOIN dbo.TRA_PROJECTS T3 ON T3.OPPORTUNITY_LINE_ID=T1.OPP_LINE_ID
@@ -100,7 +100,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                     T1.MODIFIED_DATE,T1.USER_TEXT,T1.NEXT_GATE_TRIGGERS,T1.PATH_TO_SAVE,T5.GATE_TEXT_EXPLANATION,T4.STATUS_DESCRIPTION,
                     T3.OPPORTUNITY_ID,ISNULL(T6.JOB_TITLE_DESCRIPTION,'') AS JOB_DESCRIP_RESP,ISNULL(T7.JOB_TITLE_DESCRIPTION,'') AS JOB_DESCRIP_ACC,
                     ISNULL(T8.GATE_STATUS_DESC,'') AS DEL_STATUS_DESC,ISNULL(T9.GATE_STATUS_DESC,'') AS ACC_STATUS_DESC,T3.Priority,T3.OPPORTUNITY_NAME,T3.OPPORTUNITY_LNE_NAME,
-                    T3.SALES_ORGANIZATION,T3.OWNER_SF,T3.PRODUCT_CATEGORY,T3.BUSINESS_UNIT
+                    T3.SALES_ORGANIZATION,T3.OWNER_SF,T3.PRODUCT_CATEGORY,T3.BUSINESS_UNIT,'' AS COMMENT
             FROM dbo.TRA_PROJECTS_DELIVERABLES T1
             JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID=@ModuleId AND T2.KEY_PROCESS='DEL_RESP' AND T2.GATE_STATUS_ID=T1.DELIVERABLE_STATUS_ID AND T2.IS_FINAL_STATE <> 1
             JOIN dbo.TRA_PROJECTS T3 ON T3.OPPORTUNITY_LINE_ID=T1.OPP_LINE_ID
@@ -119,7 +119,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                           T1.MODIFIED_DATE,T1.USER_TEXT,T1.NEXT_GATE_TRIGGERS,T1.PATH_TO_SAVE,T5.GATE_TEXT_EXPLANATION,T4.STATUS_DESCRIPTION,
                           T3.OPPORTUNITY_ID,ISNULL(T6.JOB_TITLE_DESCRIPTION,'') AS JOB_DESCRIP_RESP,ISNULL(T7.JOB_TITLE_DESCRIPTION,'') AS JOB_DESCRIP_ACC,
                           ISNULL(T8.GATE_STATUS_DESC,'') AS DEL_STATUS_DESC,ISNULL(T9.GATE_STATUS_DESC,'') AS ACC_STATUS_DESC,T3.Priority,T3.OPPORTUNITY_NAME,T3.OPPORTUNITY_LNE_NAME,
-                          T3.SALES_ORGANIZATION,T3.OWNER_SF,T3.PRODUCT_CATEGORY,T3.BUSINESS_UNIT
+                          T3.SALES_ORGANIZATION,T3.OWNER_SF,T3.PRODUCT_CATEGORY,T3.BUSINESS_UNIT,T10.RESP_COMMENT AS COMMENT
                   FROM dbo.TRA_PROJECTS_DELIVERABLES T1
                   JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID=@ModuleId   AND T2.KEY_PROCESS='DEL_RESP' AND T2.GATE_STATUS_ID=T1.DELIVERABLE_STATUS_ID AND T2.IS_FINAL_STATE <> 1
                   JOIN dbo.TRA_PROJECTS T3 ON T3.OPPORTUNITY_LINE_ID=T1.OPP_LINE_ID
@@ -432,8 +432,8 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                     OPP_LINE_NAME = GetString(row, "OPPORTUNITY_LNE_NAME"),
                     SALES_ORGANIZATION = GetString(row, "SALES_ORGANIZATION"),
                     DELIVERABLE_DESCRIPTION = GetString(row, "DELIVERABLE_NAME"),
-                    CurrentStatus = result.Data
-                 
+                    CurrentStatus = result.Data,
+                    TASK_COMMENT= GetString(row, "COMMENT"),
                 });
             }
         
@@ -717,8 +717,16 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                  GROUP BY OPPORTUNITY_ID,OPPORTUNITY_LINE_ID,OPPORTUNITY_NAME,OPPORTUNITY_LNE_NAME,MATNR,DESCRIPTION,SAP_CUSTOMER,
                           CUST_NAME,SALES_ORGANIZATION,PRODUCT_CATEGORY,BUSINESS_UNIT,CURRENT_QG_STATUS,RELEASED_DATE,
                           PIECES_1Y,PIECES_2Y,PIECES_3Y,PIECES_4Y,PRICE_1Y,PRICE_2Y,PRICE_3Y,PRICE_4Y,PRICE_CUR,RATE_VS_EUR,SOP,OWNER_SF,PARENT_NAME,SF_LINK,Priority";
+    }
         //TODO: AVOID HARDCODING GAYES & MODULE_ID (Module Id is in cosntatnt that should be called when we instance class
         //TODO: DELIVERABLE FIGURES MUST BE ACCORDING CURRENT GATE
+
+        private string SQL_TRA_PROJECT_STATUS()
+    {
+
+        return $@"SELECT CURRENT_STATUS
+                  FROM TRA_PROJECTS_STATUS
+                  WHERE OPP_LINE_ID = @OppLineId AND MODULE_ID = @ModuleId AND STATUS_ID = @GateId";
     }
     /// <summary>
     /// Brings from DB maximum detail for an especif Project PPROJECT->STATUS->GATES->DELIVERABLES->DELIVERABLES FILES-> DELIVERABLES COMMENTS    
@@ -734,6 +742,21 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
         {
             CancellationToken cancellationToken = default;
              string _PDCC_LINK=string.Empty;
+            //0 Check TRA_PROJECT_STATUS IF ....
+            var paramsSt = new[] { new SqlParameter("@OppLineId", Opp_Line_ID) ,
+                                   new SqlParameter("@ModuleId", _MODULE_ID),
+                                   new SqlParameter("@GateId", Gate_Id     )};
+            var queryPrStatus = await _db.GetDatatableFromSelectAsync(SQL_TRA_PROJECT_STATUS(), paramsSt, cancellationToken: cancellationToken);
+            if (!queryPrStatus.Success || queryPrStatus.DTResults == null)
+                return OperationResult<PROJECT_DETAIL>.Fail($"Error: {queryPrStatus.Message}");
+            if (queryPrStatus.RecordsAffected != 1)
+                return OperationResult<PROJECT_DETAIL>.Fail("Error: More than one project record from datatable");
+
+            string currentStatus = queryPrStatus.DTResults.Rows[0]["CURRENT_STATUS"]?.ToString().Trim();
+
+            if (currentStatus == "WAIT_GPM")
+                return OperationResult<PROJECT_DETAIL>.Fail("Error: GPM still is not available therefore user still can not work with Feasibility status");
+
             // 1 — Cabecera del proyecto
             var paramsPro = new[] { new SqlParameter("@OppLineId", Opp_Line_ID) };
             var queryResult = await _db.GetDatatableFromSelectAsync(SQL_TRA_PROJECTS_DETAIL(), paramsPro, cancellationToken: cancellationToken);
@@ -785,8 +808,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                 }
             }
 
-         
-            // 3 — Actions del gate
+            // 3 — Actions del gate , BECAUSE IF IS feas AND STTUS WAIT_GPM WE NEED TO ISSUE ERROR
             var paramsGate = new[]
             {
                 new SqlParameter("@OppLineId", Opp_Line_ID),
@@ -796,16 +818,21 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
             if (!actionsResult.Success || actionsResult.DTResults == null)
                 return OperationResult<PROJECT_DETAIL>.Fail($"Error querying actions: {actionsResult.Message}");
 
-            foreach (DataRow row in actionsResult.DTResults.Rows)
+            foreach (DataRow rowG in actionsResult.DTResults.Rows)
             {
+                if (GetString(rowG, "GATE_STATUS_ID") == "WAIT_GPM" && Gate_Id == "FEAS")
+                {
+                    return OperationResult<PROJECT_DETAIL>.Fail("Error: Cannot proceed with FEAS gate in WAIT_GPM status");
+                }
                 var curAction = new GATES_ACTIONS
                 {
-                    ACTION_ID                    = GetString(row, "SGATE_ID"),
-                    ACTION_SEQUENCE              = GetInt(row, "GATE_SEQUENCE"),
-                    ACTION_TARGET                = GetString(row, "GATE_TEXT_EXPLANATION"),
-                    ACTION_GENERATION_TYPE       = GetString(row, "GATE_TYPE"),
-                                      
+                    ACTION_ID = GetString(rowG, "SGATE_ID"),
+                    ACTION_SEQUENCE = GetInt(rowG, "GATE_SEQUENCE"),
+                    ACTION_TARGET = GetString(rowG, "GATE_TEXT_EXPLANATION"),
+                    ACTION_GENERATION_TYPE = GetString(rowG, "GATE_TYPE"),
+
                 };
+
 
                 // 4 — Deliverables de cada action
                 var paramsDeliv = new[]

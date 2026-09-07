@@ -85,6 +85,7 @@ public class MY_TASKS
     public string DELIVERABLE_DESCRIPTION { get; set; } = string.Empty;
     public string SALES_ORGANIZATION { get; set; } = string.Empty;
 
+    public string TASK_COMMENT { get; set; } = string.Empty;
 }
 public class TASKS_PENDING_TO_ALLOCATE
 {

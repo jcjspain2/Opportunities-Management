@@ -459,7 +459,7 @@ namespace QUALITY_GATES.Classes
                 cancellationToken: cancellationToken);
 
             if (!result.Success || result.DTResults == null)
-                return (false, $"Error validating status: {result.Message}");
+                return (false, $"Error validating status: {"Error trying to update " + STATUS_ID_TO_UPDATE + ": " + result.Message}");
 
             if (Convert.ToInt32(result.DTResults.Rows[0][0]) == 0)
                 return (false, $"Status '{STATUS_ID_TO_UPDATE}' is not valid.");
