@@ -330,7 +330,8 @@ namespace QUALITY_GATES.Classes
             var keyProcess = RoleDeliverable == DeliverableRolesEstructure.Responsible ? "DEL_RESP" : "DEL_ACC";
             string STATUS_ID_RESPONSIBLE=string.Empty;
             string STATUS_ID_ACCOUNTABLE=string.Empty;
-
+            string STATUS_ID_GATE = "INPROGRESS";
+            //TODO: Need to determine GATE ststus when all deliverable finsih create code
             switch (RoleDeliverable)
             {
                 case DeliverableRolesEstructure.Responsible:
@@ -343,7 +344,7 @@ namespace QUALITY_GATES.Classes
                         case "INPROGRESS":
                             STATUS_ID_RESPONSIBLE = "INPROGRESS";
                             STATUS_ID_ACCOUNTABLE = "INPROGRESS";
-                            break;
+                             break;
                         case "WAIVED":
                             STATUS_ID_RESPONSIBLE = "WAIVED";
                             STATUS_ID_ACCOUNTABLE = "PENDING_A";
@@ -422,22 +423,42 @@ namespace QUALITY_GATES.Classes
                         tx.Rollback();
                         return OperationResult<bool>.Fail($"Error updating accountable status: {accResult.Message}");
                     }
-                // Also we need to update Gate Status
+               
+                tx.Commit();
+                // Also we need to update Gate Status after commit deliverable status otherways is not trustable
+                // First we need to check if all deliverables are in final status from accountable perpective.
+                const string sqlDelFinalState = @"
+                  SELECT COUNT(*) AS NOT_FINAL_STATE_DELIVERBLES
+                  FROM dbo.TRA_PROJECTS_DELIVERABLES
+                  JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID = 'Q_GATES' AND T2.KEY_PROCESS = 'DEL_ACC' AND IS_FINAL_STATE<> 1
+                  where OPP_LINE_ID = @OppLineId AND STATUS_ID = @StatusId ";
+
+
                 SqlParameter[] ParamsStatus() => new[]
       {
-                new SqlParameter("@StatusIdToUpdate", "IN_PROGRES"),
+                new SqlParameter("@StatusIdToUpdate",STATUS_ID_GATE ),
                 new SqlParameter("@OppLineId",        oppLineId),
                 new SqlParameter("@StatusId",         statusId),
                 new SqlParameter("@UserId",           USER_ID_WHO_REQUEST)
             };
+
+                var resultDelNotFinalState = await _db.GetDatatableFromSelectAsync(sqlDelFinalState, ParamsStatus(), cancellationToken: cancellationToken);
+
+                if (!resultDelNotFinalState.Success)
+                    return OperationResult<bool>.Fail($"Error: {result.Message}");
+                   
+
+                if (Convert.ToInt32(resultDelNotFinalState.DTResults.Rows[0]["NOT_FINAL_STATE_DELIVERBLES"]) == 0)
+                {
+                    STATUS_ID_GATE = "COMPLETED";
+                }
                 var StatusResult = await _db.NonQueryDataToSQLServer(
-                       SQL_Update_Status(), ParamsStatus(), transaction: tx, cancellationToken: cancellationToken);
+                       SQL_Update_Status(), ParamsStatus(), cancellationToken: cancellationToken);
                 if (!StatusResult.Success)
                 {
-                    tx.Rollback();
                     return OperationResult<bool>.Fail($"Error updating Gate status: {StatusResult.Message}");
                 }
-                tx.Commit();
+
                 return OperationResult<bool>.Ok(true);
             }
             catch
@@ -479,7 +500,7 @@ namespace QUALITY_GATES.Classes
 
         private static string SQL_Update_Status() => @"
             UPDATE dbo.TRA_PROJECTS_STATUS
-            SET    CURRENT_STATUS = @StatusId
+            SET    CURRENT_STATUS = @StatusIdToUpdate
             WHERE  OPP_LINE_ID    = @OppLineId
               AND  STATUS_ID      = @StatusId ";
 

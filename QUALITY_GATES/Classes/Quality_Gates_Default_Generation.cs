@@ -4,7 +4,8 @@ using Microsoft.Data.SqlClient;
 using QUALITY_GATES.Data;
 using QUALITY_GATES.Models;
 using System.Data;
-
+using System.Data.Common;
+using static QUALITY_GATES.Tools.Static_Local_Functions;
 public partial class Class_Projects_Quality_Gates
 {
     public async Task<Return_SQL_Action> Generate_Next_Default_Gate(string OPP_LINE_ID, string USER_ID_WHO_REQUEST = "System",CancellationToken cancellationToken = default)
@@ -88,7 +89,8 @@ public partial class Class_Projects_Quality_Gates
                    RESPONSIBLE_JOB_TITLE,
                    ACCOUNTABLE_JOB_TITLE,
                    SUPORTING_JOB_TITLE,
-                   IsDeleted
+                   IsDeleted,
+                   GENERATES_NEXT_GATE
             FROM dbo.MAS_DELIVERABLES
             WHERE STATUS_ID= @GateID  AND (IsDeleted IS NULL OR IsDeleted = 0)
             """;
@@ -174,7 +176,10 @@ public partial class Class_Projects_Quality_Gates
                     new SqlParameter("@RESP_User_Id", ""),
                     new SqlParameter("@ACC_User_Id", ""),
                     new SqlParameter("@User", USER_ID_WHO_REQUEST ),
-                    new SqlParameter("@FolderToSave", "")
+                    new SqlParameter("@FolderToSave", ""),
+                    new SqlParameter("@Generates_Next_Gate",GetBoolean(rowD, "GENERATES_NEXT_GATE"))
+ 
+                     
                 };
                 queryResult = await _db.NonQueryDataToSQLServer(GetInsertDefaultGateDeliverables(GateID), parametersDel, transaction: tx);
                 if (!queryResult.Success)
@@ -256,7 +261,8 @@ public partial class Class_Projects_Quality_Gates
                    RESPONSIBLE_JOB_TITLE,
                    ACCOUNTABLE_JOB_TITLE,
                    SUPORTING_JOB_TITLE,
-                   IsDeleted
+                   IsDeleted,
+                   GENERATES_NEXT_GATE
             FROM dbo.MAS_DELIVERABLES
             WHERE STATUS_ID= @GateID  AND (IsDeleted IS NULL OR IsDeleted = 0)         
             """;
@@ -353,12 +359,13 @@ public partial class Class_Projects_Quality_Gates
                       new SqlParameter("@ActualEndDate", DateTime.Now),
                       new SqlParameter("@UseStartDate", DateTime.Now),
                       new SqlParameter("@UserEndDate", DateTime.Now),
-                      new SqlParameter("@RESP_Job_Id", rowD["RESPONSIBLE_JOB_TITLE"].ToString()),
+                      new SqlParameter("@RESP_Job_Id", GetString( rowD, "RESPONSIBLE_JOB_TITLE")),
                       new SqlParameter("@ACC_Job_Id", rowD["ACCOUNTABLE_JOB_TITLE"].ToString()),
                       new SqlParameter("@RESP_User_Id", ""),
                       new SqlParameter("@ACC_User_Id", ""),
                       new SqlParameter("@User", "System"),
-                      new SqlParameter("@FolderToSave",  _FolderToSave )
+                      new SqlParameter("@FolderToSave",  _FolderToSave ),
+                      new SqlParameter("@Generates_Next_Gate",GetBoolean(rowD, "GENERATES_NEXT_GATE"))
                     };
                     queryResult = await _db.NonQueryDataToSQLServer(GetInsertDefaultGateDeliverables(GateID), parametersDel, transaction: tx);
                     if (!queryResult.Success)
@@ -495,7 +502,8 @@ public partial class Class_Projects_Quality_Gates
                              ,[CREATED_DATE]
                              ,[MODIFIED_BY]
                              ,[MODIFIED_DATE]
-                             ,PATH_TO_SAVE)
+                             ,PATH_TO_SAVE
+                             ,NEXT_GATE_TRIGGERS)
                    VALUES(
                           @OppLineId,
                           @StatusId,
@@ -520,7 +528,8 @@ public partial class Class_Projects_Quality_Gates
                           GETDATE(),    --CREATED_DATE
                           @User,        --MODIIFIED_BY
                           GETDATE(),   --MODIFIED_DATE
-                          @FolderToSave)"; 
+                          @FolderToSave,
+                          @Generates_Next_Gate)"; 
     }
 }
  
