@@ -20,15 +20,5 @@ public partial class Class_Projects_Quality_Gates
         //_dms = serviceProvider.GetService<IDmsFlowService>();
     }
 
-    public static async Task<Class_Projects_Quality_Gates> CreateAsync(
-        IDbConnectionFactory db,
-        IServiceProvider serviceProvider,
-        Module_ID currentModule = Module_ID.Q_GATES,
-        Enviroment currentEnviroment = Enviroment.PRODUCTION,
-        CancellationToken cancellationToken = default)
-    {
-        var instance = new Class_Projects_Quality_Gates(db, serviceProvider, currentModule, currentEnviroment);
-        await instance.Generate_Default_Gate_FromInitial("PCA", cancellationToken: cancellationToken);
-        return instance;
-    }
+
 }

@@ -331,6 +331,7 @@ namespace QUALITY_GATES.Classes
             string STATUS_ID_RESPONSIBLE=string.Empty;
             string STATUS_ID_ACCOUNTABLE=string.Empty;
             string STATUS_ID_GATE = "INPROGRESS";
+            bool isAccountableApproved = false; // used for next gate generation 
             //TODO: Need to determine GATE ststus when all deliverable finsih create code
             switch (RoleDeliverable)
             {
@@ -361,6 +362,7 @@ namespace QUALITY_GATES.Classes
                         case "APPROVED":
                             STATUS_ID_RESPONSIBLE = "COMPLETED";
                             STATUS_ID_ACCOUNTABLE = "APPROVED";
+                            isAccountableApproved = true; // Ok for checking next gate generation
                             break;
                     }
                     
@@ -374,8 +376,31 @@ namespace QUALITY_GATES.Classes
             var (isValidAcc, validationErrorAcc) = await ValidateDeliverableStatusExistsAsync(STATUS_ID_ACCOUNTABLE, "DEL_ACC", cancellationToken);
             if (!isValidAcc)
                 return OperationResult<bool>.Fail(validationErrorAcc!);
+            // Check if is Deliverable that generates NEXT gate
+            const string sqlDeliverableNextgate = @"
+                  SELECT 1
+                  FROM dbo.TRA_PROJECTS_DELIVERABLES
+                  WHERE OPP_LINE_ID = @OppLineId AND STATUS_ID = @StatusId AND SGATE_ID=@SGateId AND DELIVERABLE_ID=@DelId AND
+                        NEXT_GATE_TRIGGERS=1";
+            if (isAccountableApproved)
+            {
+                var resultNextGate = await _db.GetDatatableFromSelectAsync(sqlDeliverableNextgate,
+                   new[] { new SqlParameter("@OppLineId",        oppLineId),
+                       new SqlParameter("@StatusId",         statusId),
+                       new SqlParameter("@SgateId",          sgateId),
+                       new SqlParameter("@DelId",            delId) },
+                   cancellationToken: cancellationToken);
 
-
+                if (!resultNextGate.Success || resultNextGate.DTResults == null)
+                    return OperationResult<bool>.Fail($"Error checking if is deliverable next gate:  '{oppLineId}/{statusId}/{sgateId}/{delId} + {resultNextGate.Message}'");
+                if (resultNextGate.RecordsAffected == 1)
+                {
+                    var result = await Generate_Next_Default_Gate(oppLineId);
+                    if (!result.Success)
+                        return OperationResult<bool>.Fail($"Error generating next gate: {result.Message}");
+                }
+            }
+            
             bool alsoUpdateAccountable = keyProcess == "DEL_RESP" && STATUS_ID_TO_UPDATE == "PENDING_A";
 
             SqlParameter[] ParamsResp() => new[]

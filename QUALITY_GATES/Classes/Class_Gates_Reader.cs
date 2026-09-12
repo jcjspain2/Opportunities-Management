@@ -92,6 +92,25 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
             LEFT JOIN dbo.MAS_GATE_STATUS T8 ON T8.GATE_STATUS_ID=T1.DELIVERABLE_STATUS_ID AND T8.KEY_PROCESS='DEL_RESP'  
             LEFT JOIN dbo.MAS_GATE_STATUS T9 ON T9.GATE_STATUS_ID=T1.ACCOUNTABLE_STATUS_ID AND T9.KEY_PROCESS='DEL_ACC' 
             WHERE T1.ACCOUNTABLE_USER_ID=@UserId";
+
+    private static string SQL_Get_Accountant_Pending_Allocate_User_ID() => @"
+            SELECT T1.OPP_LINE_ID,T1.STATUS_ID,T1.SGATE_ID,T1.DELIVERABLE_ID,T1.DELIVERABLE_STATUS_ID,T1.ACCOUNTABLE_STATUS_ID,T1.DELIVERABLE_CREATION_TYPE,
+                    T1.DELIVERABLE_NAME,T1.DELIVERABLE_ACEPTANCE_CRITERIA,T1.PLANNED_START_DATE,T1.PLANNED_END_DATE,T1.ACTUAL_START_DATE,T1.ACTUAL_END_DATE,T1.USER_START_DATE,
+                    T1.USER_FINISH_DATE,T1.RESPONSIBLE_JOB_ID,T1.ACCOUNTABLE_JOB_ID,T1.RESPONSIBLE_USER_ID,T1.ACCOUNTABLE_USER_ID,T1.CREATED_BY,T1.CREATED_DATE,T1.MODIFIED_BY,
+                    T1.MODIFIED_DATE,T1.USER_TEXT,T1.NEXT_GATE_TRIGGERS,T1.PATH_TO_SAVE,T5.GATE_TEXT_EXPLANATION,T4.STATUS_DESCRIPTION,
+                    T3.OPPORTUNITY_ID,ISNULL(T6.JOB_TITLE_DESCRIPTION,'') AS JOB_DESCRIP_RESP,ISNULL(T7.JOB_TITLE_DESCRIPTION,'') AS JOB_DESCRIP_ACC,
+                    ISNULL(T8.GATE_STATUS_DESC,'') AS DEL_STATUS_DESC,ISNULL(T9.GATE_STATUS_DESC,'') AS ACC_STATUS_DESC,T3.Priority,T3.OPPORTUNITY_NAME,T3.OPPORTUNITY_LNE_NAME,
+                    T3.SALES_ORGANIZATION,T3.OWNER_SF,T3.PRODUCT_CATEGORY,T3.BUSINESS_UNIT,'' AS COMMENT
+            FROM dbo.TRA_PROJECTS_DELIVERABLES T1
+            JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID='Q_GATES' AND T2.KEY_PROCESS='DEL_ACC' AND T2.GATE_STATUS_ID=T1.ACCOUNTABLE_STATUS_ID AND T2.IS_FINAL_STATE <> 1
+            JOIN dbo.TRA_PROJECTS T3 ON T3.OPPORTUNITY_LINE_ID=T1.OPP_LINE_ID
+            JOIN dbo.MAS_STATUS T4 ON T4.STATUS_MODULE='Q_GATES' AND T4.STATUS_ID=T1.STATUS_ID
+            JOIN dbo.TRA_PROJECTS_GATES T5 ON T5.OPP_LINE_ID=T1.OPP_LINE_ID  AND T5.STATUS_ID=T1.STATUS_ID AND T5.SGATE_ID=T1.SGATE_ID
+            LEFT JOIN dbo.MAS_JOB_TITLES T6 ON T6.JOB_TITLE_ID=T1.RESPONSIBLE_JOB_ID
+            LEFT JOIN dbo.MAS_JOB_TITLES T7 ON T7.JOB_TITLE_ID=T1.ACCOUNTABLE_JOB_ID
+            LEFT JOIN dbo.MAS_GATE_STATUS T8 ON T8.GATE_STATUS_ID=T1.DELIVERABLE_STATUS_ID AND T8.KEY_PROCESS='DEL_RESP'  
+            LEFT JOIN dbo.MAS_GATE_STATUS T9 ON T9.GATE_STATUS_ID=T1.ACCOUNTABLE_STATUS_ID AND T9.KEY_PROCESS='DEL_ACC' 
+            WHERE T1.ACCOUNTABLE_USER_ID=@UserId";
     // Pending Tasks as accountable = 
     private static string SQL_Get_Responsible_Pending_Approval_MyTasks() => @"
             SELECT T1.OPP_LINE_ID,T1.STATUS_ID,T1.SGATE_ID,T1.DELIVERABLE_ID,T1.DELIVERABLE_STATUS_ID,T1.ACCOUNTABLE_STATUS_ID,T1.DELIVERABLE_CREATION_TYPE,
@@ -291,7 +310,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                 SqlString = SQL_Get_Responsible_Pending_Approval_MyTasks();
                 break;
             case DeliverableRolesEstructure.Accountable:
-                SqlString = SQL_Get_Accountant_Pending_Approval_MyTasks();
+                SqlString = SQL_Get_Accountant_Pending_Allocate_User_ID();
                 break;
             default:
                 return OperationResult<List<TASKS_PENDING_TO_ALLOCATE>>.Fail($"Error: Invalid role specified.");
@@ -368,6 +387,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
     }
     public async Task<OperationResult<List<MY_TASKS>>> Get_MyTasks_Pending(string UserId, DeliverableRolesEstructure Role)
     {
+        UserId= UserId.Trim();
         var paramsAcc = new[] { new SqlParameter("@ModuleId", _MODULE_ID), 
                                 new SqlParameter("@UserId", UserId) };
         CancellationToken cancellationToken = default;
@@ -378,7 +398,15 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                 SqlString = SQL_Get_Responsible_Pending_Approval_MyTasks();
                 break;
             case DeliverableRolesEstructure.Accountable:
-                SqlString = SQL_Get_Accountant_Pending_Approval_MyTasks();
+                if (string.IsNullOrWhiteSpace(UserId))
+                {
+                    return OperationResult<List<MY_TASKS>>.Fail($"Error User not provided");
+                }
+                else
+                {
+                    SqlString = SQL_Get_Accountant_Pending_Approval_MyTasks(); // here only pending to approve deliverables
+                }
+               
                 break;
             case DeliverableRolesEstructure.Collaborator:
                 SqlString = SQL_Get_CollaboratorR_Pending_Approval_MyTasks();
@@ -494,6 +522,12 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
    
     {
         CancellationToken cancellationToken = default;
+        // This is default page of the program when an user enteres here we need to check if any project is initial in order to generate 
+        // all metadata related
+        var result = await Generate_Default_Gate_FromInitial("PCA");
+        if (!result.Success )
+        { return OperationResult<List<PROJECTS_HEADER>>.Fail($"Error : {result.Message}"); }
+        ;
         OperationResult<List<PROJECTS_HEADER>> resultado = new OperationResult<List<PROJECTS_HEADER>>();
 
         List<PROJECTS_HEADER> currentprojectList = new List<PROJECTS_HEADER>();
