@@ -15,6 +15,7 @@ using System.Threading;
 using  UtilidadesFichero;
 using static QUALITY_GATES.Data.SqlConnectionFactory;
 using static QUALITY_GATES.Tools.Static_Local_Functions;
+using  QUALITY_GATES.Classes;
 
 public partial class Class_Projects_Quality_Gates // Reader provide functions to display in UI current staus of projects and quality gates
 {
@@ -519,17 +520,19 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
     }
 
     public async Task<OperationResult<List<PROJECTS_HEADER>>> Get_Projects_Header_Details()
-   
+
     {
         CancellationToken cancellationToken = default;
         // This is default page of the program when an user enteres here we need to check if any project is initial in order to generate 
         // all metadata related
-        var result = await Generate_Default_Gate_FromInitial("PCA");
-        if (!result.Success )
-        { return OperationResult<List<PROJECTS_HEADER>>.Fail($"Error : {result.Message}"); }
-        ;
-        OperationResult<List<PROJECTS_HEADER>> resultado = new OperationResult<List<PROJECTS_HEADER>>();
-
+        if (!_IsUpdateInitialGate)
+        { 
+            var result = await Generate_Default_Gate_FromInitial("PCA");
+            if (!result.Success)
+               { return OperationResult<List<PROJECTS_HEADER>>.Fail($"Error : {result.Message}"); }
+        }
+        //OperationResult<List<PROJECTS_HEADER>> resultado = new OperationResult<List<PROJECTS_HEADER>>();
+        _IsUpdateInitialGate = true;
         List<PROJECTS_HEADER> currentprojectList = new List<PROJECTS_HEADER>();
         try
         {

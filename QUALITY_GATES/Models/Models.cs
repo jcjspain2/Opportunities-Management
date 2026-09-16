@@ -245,6 +245,9 @@ public class USERS_COLLABORATIVE
     public string Responsible_Task_Comment { get; set; } = string.Empty;
     
 }
+
+
+
 public enum Priority
 {
     High = 1,

@@ -226,7 +226,8 @@ public partial class Class_Projects_Quality_Gates
                 OPPORTUNITY_ID,
                 OPPORTUNITY_LINE_ID,
                 OPPORTUNITY_NAME,
-                OPPORTUNITY_LNE_NAME
+                OPPORTUNITY_LNE_NAME,
+                OWNER_SF
             FROM [dbo].[TRA_PROJECTS]
             WHERE IsGeneratedInitial = 0
             """;
@@ -274,6 +275,7 @@ public partial class Class_Projects_Quality_Gates
         { return queryResult; } // Error generating SQL query 
         if (queryResult.Success & queryResult.RecordsAffected == 0)
         { return queryResult; } // No records to process
+
         DataTable dtProjects = queryResult.DTResults;
         
         // Second recover default actions
@@ -390,6 +392,33 @@ public partial class Class_Projects_Quality_Gates
                 
             }
             tx.Commit(); // Commit transaction if all operations succeed
+            // Assign owner to deliverables whose job title is KEY_ACC_M
+            const string sqlUpdateKeyAccM = """
+                UPDATE [SRM].[dbo].[TRA_PROJECTS_DELIVERABLES]
+                SET RESPONSIBLE_USER_ID = CASE WHEN RESPONSIBLE_JOB_ID = 'KEY_ACC_M' THEN @Owner ELSE RESPONSIBLE_USER_ID END,
+                    ACCOUNTABLE_USER_ID = CASE WHEN ACCOUNTABLE_JOB_ID = 'KEY_ACC_M' THEN @Owner ELSE ACCOUNTABLE_USER_ID END,
+                    MODIFIED_BY         = 'System',
+                    MODIFIED_DATE       = GETDATE()
+                WHERE OPP_LINE_ID = @OppLineId
+                  AND STATUS_ID   = @StatusId
+                  AND (RESPONSIBLE_JOB_ID = 'KEY_ACC_M' OR ACCOUNTABLE_JOB_ID = 'KEY_ACC_M')
+                """;
+            foreach (DataRow rowP in dtProjects.Rows)
+            {
+                string ownerSf = GetString(rowP, "OWNER_SF");
+                if (string.IsNullOrWhiteSpace(ownerSf))
+                    continue;
+             
+                var paramsUpdate = new[]
+                {
+                    new SqlParameter("@Owner",     ownerSf),
+                    new SqlParameter("@OppLineId", GetString(rowP, "OPPORTUNITY_LINE_ID")),
+                    new SqlParameter("@StatusId",  GateID)
+                };
+                queryResult = await _db.NonQueryDataToSQLServer(sqlUpdateKeyAccM, paramsUpdate, cancellationToken: cancellationToken);
+                if (!queryResult.Success)
+                    return queryResult;
+            }
         }
         catch (Exception ex)
         {
