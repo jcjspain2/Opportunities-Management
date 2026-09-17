@@ -28,6 +28,8 @@ public class PROJECTS_HEADER
     public int VALUE_3Y_EUR { get; set; } = 0;
     public int PARTS_4Y { get; set; } = 0;
     public int VALUE_4Y_EUR { get; set; } = 0;
+    public int PARTS_5Y { get; set; } = 0;
+    public int VALUE_5Y_EUR { get; set; } = 0;
     public int VALUE_TOTAL_ALL_EUR { get; set; } = 0;
      public string CURRENT_GATE_ID { get; set; } = string.Empty;
     public int TOTAL_DELIVERABLES { get; set; } = 0;

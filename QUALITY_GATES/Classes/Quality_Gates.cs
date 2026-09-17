@@ -11,6 +11,7 @@ public partial class Class_Projects_Quality_Gates
     private readonly IDbConnectionFactory _db;
     private readonly IDmsFlowService? _dms;
     static private  string _MODULE_ID ;
+    static private Module_ID _MODULE_ID_ENUM;
     private  string _ENVIRONMENT ;
     private bool _IsUpdateInitialGate = false;
     public Class_Projects_Quality_Gates(IDbConnectionFactory db, IServiceProvider serviceProvider, Module_ID CurrentModule = Module_ID.Q_GATES, Enviroment CurrentEnviroment = Enviroment.PRODUCTION)
@@ -18,6 +19,7 @@ public partial class Class_Projects_Quality_Gates
 
         _db = db;
         _MODULE_ID = CurrentModule.ToString().Trim();
+        _MODULE_ID_ENUM = CurrentModule;
         _ENVIRONMENT = CurrentEnviroment.ToString().Trim();
         
         //_dms = serviceProvider.GetService<IDmsFlowService>();

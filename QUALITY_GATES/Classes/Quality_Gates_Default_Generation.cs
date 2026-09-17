@@ -15,7 +15,7 @@ public partial class Class_Projects_Quality_Gates
         // Check if requester user has right to do it
         if (USER_ID_WHO_REQUEST != "System") // System always allowed to generate next gate, no matter the job title
         {
-            var result = await Get_KeyProcess_Job_title_Restriction("@GATE_GEN ", USER_ID_WHO_REQUEST, cancellationToken);
+            var result = await Get_KeyProcess_Job_title_Restriction("@GATE_GEN", USER_ID_WHO_REQUEST, cancellationToken);
             if (!result.Success)
                 return new Return_SQL_Action { Success = false, Message = result.ErrorMessage };
         }
@@ -223,7 +223,7 @@ public partial class Class_Projects_Quality_Gates
     public async Task<Return_SQL_Action> Generate_Default_Gate_FromInitial(string GateID,
                                                                           CancellationToken cancellationToken = default)
     {
-        const string sqlProjects = """
+        const string sqlProjects = """ 
             SELECT
                 OPPORTUNITY_ID,
                 OPPORTUNITY_LINE_ID,
@@ -231,8 +231,18 @@ public partial class Class_Projects_Quality_Gates
                 OPPORTUNITY_LNE_NAME,
                 OWNER_SF
             FROM [dbo].[TRA_PROJECTS]
-            WHERE IsGeneratedInitial = 0
-            """;
+            WHERE Is_Q_GATES=1 AND IsGeneratedInitial = 0
+            """; // For opportunity management
+        const string sqlProjects_PR = """
+            SELECT
+                OPPORTUNITY_ID,
+                OPPORTUNITY_LINE_ID,
+                OPPORTUNITY_NAME,
+                OPPORTUNITY_LNE_NAME,
+                OWNER_SF
+            FROM [dbo].[TRA_PROJECTS]
+            WHERE Is_Q_GATES_PR=1 AND IsGeneratedInitial_PR = 0
+            """; // For Projects
         const string sqlActions = """
             SELECT MODULE_ID,
                    STATUS_ID,
@@ -269,10 +279,22 @@ public partial class Class_Projects_Quality_Gates
             FROM dbo.MAS_DELIVERABLES
             WHERE STATUS_ID= @GateID  AND (IsDeleted IS NULL OR IsDeleted = 0)         
             """;
-        
-       
-        // First recover all projects pending to process.
-        var queryResult = await _db.GetDatatableFromSelectAsync(sqlProjects, null, cancellationToken: cancellationToken);
+
+        // First recover all projects pending to process depending MODULE_ID
+        string _SqlProject = string.Empty;
+        switch (_MODULE_ID_ENUM)
+        {
+            case Module_ID.Q_GATES:
+                _SqlProject = sqlProjects;
+                break;
+            case Module_ID.Q_GATES_PR:
+                _SqlProject = sqlProjects_PR;
+                break;
+            default:
+                _SqlProject = string.Empty;
+                break;
+        }
+        var queryResult = await _db.GetDatatableFromSelectAsync(_SqlProject, null, cancellationToken: cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
         { return queryResult; } // Error generating SQL query 
         if (queryResult.Success & queryResult.RecordsAffected == 0)
@@ -384,7 +406,7 @@ public partial class Class_Projects_Quality_Gates
                  { new SqlParameter("@Project_Id", rowP["OPPORTUNITY_LINE_ID"].ToString()),
                    new SqlParameter("@Current_Status", GateID) 
                  };
-                queryResult = await _db.NonQueryDataToSQLServer(GetUpdateProjectAsFeasiilityGenerated(), parametersUpdtProject, transaction: tx);
+                queryResult = await _db.NonQueryDataToSQLServer(GetUpdateProjectAsFeasiilityGenerated(_MODULE_ID_ENUM), parametersUpdtProject, transaction: tx);
                 if (!queryResult.Success)
                 {
                     tx.Rollback();
@@ -442,13 +464,34 @@ public partial class Class_Projects_Quality_Gates
                      SET CURRENT_QG_STATUS = @Current_Status
                    WHERE OPPORTUNITY_LINE_ID = @Project_Id";
     }
-    private string GetUpdateProjectAsFeasiilityGenerated()
+    /// <summary>
+    /// Returns the SQL update statement used to mark a project as generated for feasibility, based on the specified
+    /// module.
+    /// </summary>
+    /// <remarks>The returned SQL statement is intended for use with the <see cref="Module_ID.Q_GATES"/>
+    /// module. For unsupported modules, the method returns an empty string.</remarks>
+    /// <param name="CurrentModule">The module identifier that determines which SQL update statement to return.</param>
+    /// <returns>A SQL update statement as a string if the specified module is supported; otherwise, an empty string.</returns>
+    private string GetUpdateProjectAsFeasiilityGenerated(Module_ID CurrentModule)
     {
-        return $@" UPDATE [SRM].[dbo].[TRA_PROJECTS]
-                          SET IsGeneratedInitial = 1,
-                              CURRENT_QG_STATUS=@Current_Status,
-                              RELEASED_DATE= GETDATE()
-                     WHERE  OPPORTUNITY_LINE_ID= @Project_Id  ";
+        switch (CurrentModule)
+        {
+            case Module_ID.Q_GATES:
+                return $@" UPDATE [SRM].[dbo].[TRA_PROJECTS]
+                           SET IsGeneratedInitial = 1,
+                               CURRENT_QG_STATUS=@Current_Status,
+                               RELEASED_DATE= GETDATE()
+                           WHERE  OPPORTUNITY_LINE_ID= @Project_Id  ";
+            case Module_ID.Q_GATES_PR:
+                return $@" UPDATE [SRM].[dbo].[TRA_PROJECTS]
+                           SET IsGeneratedInitial_PR = 1,
+                               CURRENT_QG_STATUS=@Current_Status,
+                               RELEASED_DATE= GETDATE()
+                           WHERE  OPPORTUNITY_LINE_ID= @Project_Id  ";
+            default:
+                return string.Empty;
+        }
+  
                           
     }
     private string GetInsertDefaulGateStatus()

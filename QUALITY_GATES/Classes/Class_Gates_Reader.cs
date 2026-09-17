@@ -526,8 +526,21 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
         // This is default page of the program when an user enteres here we need to check if any project is initial in order to generate 
         // all metadata related
         if (!_IsUpdateInitialGate)
-        { 
-            var result = await Generate_Default_Gate_FromInitial("PCA");
+        {
+            string _InitialGate;
+             switch (_MODULE_ID_ENUM)
+            {
+                case Module_ID.Q_GATES:
+                    _InitialGate="PCA";
+                    break;
+                case Module_ID.Q_GATES_PR:
+                    _InitialGate = "DE_VAL";
+                    break;
+                 default:
+                    return OperationResult<List<PROJECTS_HEADER>>.Fail($"Module does not exists");
+            
+            }
+            var result = await Generate_Default_Gate_FromInitial(_InitialGate);
             if (!result.Success)
                { return OperationResult<List<PROJECTS_HEADER>>.Fail($"Error : {result.Message}"); }
         }
@@ -536,7 +549,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
         List<PROJECTS_HEADER> currentprojectList = new List<PROJECTS_HEADER>();
         try
         {
-            var queryResult = await _db.GetDatatableFromSelectAsync(SQL_TRA_PROJECTS(), null, cancellationToken: cancellationToken);
+            var queryResult = await _db.GetDatatableFromSelectAsync(SQL_TRA_PROJECTS(_MODULE_ID_ENUM), null, cancellationToken: cancellationToken);
             if (!queryResult.Success || queryResult.DTResults == null)
             { return OperationResult<List<PROJECTS_HEADER>>.Fail($"Error : {queryResult.Message}");};
             // Here we need to feed objects
@@ -582,7 +595,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                     VALUE_TOTAL_ALL_EUR = Convert.ToInt32((GetInt(row, "PIECES_1Y") * TargetPrice)) + Convert.ToInt32((GetInt(row, "PIECES_2Y") * TargetPrice)) + Convert.ToInt32((GetInt(row, "PIECES_3Y") * TargetPrice)) + Convert.ToInt32((GetInt(row, "PIECES_4Y") * TargetPrice))
                 };
                 // From here we have to recover Gate Status Availables for each project and add it currentprojectList
-                const string sqlNextGate = @"SELECT T1.STATUS_ID,STATUS_DESCRIPTION,STATUS_SEQUENCE,T2.STATUS_ID,ISNULL(CURRENT_STATUS,
+                const string sqlNextGate = $@"SELECT T1.STATUS_ID,STATUS_DESCRIPTION,STATUS_SEQUENCE,T2.STATUS_ID,ISNULL(CURRENT_STATUS,
                                                     'NO_GEN')AS CURRENT_STATUS ,T2.GENERATION_DATE,T2.GENERATION_USER,T2.TIMES_REOPENED, 
                                                        ISNULL(T3.GATE_STATUS_DESC,'No Generated') AS CURSTATUS_DESC,[CLOSING_DATE],[CLOSING_USER],
                                                        T3.IS_FINAL_STATE,T3.IS_PENDING_REVIEW,T3.IS_INITIAL_STATE,T3.IS_IN_PROGRESS,
@@ -597,7 +610,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                                              LEFT JOIN dbo.TRA_PROJECTS_DELIVERABLES T4 ON T4.OPP_LINE_ID=@OppLineId AND T4.STATUS_ID=T1.STATUS_ID
                                              LEFT JOIN dbo.MAS_GATE_STATUS T5 ON T5.GATE_STATUS_ID=T4.DELIVERABLE_STATUS_ID AND T5.MODULE_ID='Q_GATES' AND T5.KEY_PROCESS='DEL_RESP'
                                              LEFT JOIN dbo.MAS_GATE_STATUS T6 ON T6.GATE_STATUS_ID=T4.ACCOUNTABLE_STATUS_ID AND T6.MODULE_ID='Q_GATES' AND T6.KEY_PROCESS='DEL_ACC'   
-                                             WHERE T1.STATUS_MODULE='Q_GATES' AND T1.IsDeleted=0
+                                             WHERE T1.STATUS_MODULE=@ModuleId AND T1.IsDeleted=0
                                              GROUP BY T1.STATUS_ID,STATUS_DESCRIPTION,STATUS_SEQUENCE,T2.STATUS_ID,ISNULL(CURRENT_STATUS,'NO_GEN')
                                                    ,T2.GENERATION_DATE,T2.GENERATION_USER,T2.TIMES_REOPENED, 
                                                    ISNULL(T3.GATE_STATUS_DESC,'No Generated') ,[CLOSING_DATE],[CLOSING_USER],
@@ -716,9 +729,12 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                WHERE CURRENT_QG_STATUS IN ('PCA','FEAS') AND [IsGeneratedInitial]=1 AND OPPORTUNITY_LINE_ID= @OppLineId";
     //TODO:IMPROVE HARDCODING QUALITY GATES FILTE
     }
-    private string SQL_TRA_PROJECTS()
+    private string SQL_TRA_PROJECTS(Module_ID CurrentModule)
     {
-        return $@"SELECT OPPORTUNITY_ID,
+        switch (CurrentModule)
+        {
+            case Module_ID.Q_GATES:
+                return $@"SELECT OPPORTUNITY_ID,
                          OPPORTUNITY_LINE_ID,
                          OPPORTUNITY_NAME,
                          OPPORTUNITY_LNE_NAME,
@@ -734,6 +750,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                          PIECES_2Y,
                          PIECES_3Y,
                          PIECES_4Y,
+                         PIECES_5Y,
                          PRICE_1Y,PRICE_2Y,PRICE_3Y,PRICE_4Y,PRICE_CUR,RATE_VS_EUR,SOP,OWNER_SF,
                          PARENT_NAME,SF_LINK,
                          Priority,
@@ -750,15 +767,54 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                  LEFT JOIN dbo.TRA_PROJECTS_DELIVERABLES T2 ON T2.OPP_LINE_ID=OPPORTUNITY_LINE_ID
                  LEFT JOIN dbo.MAS_GATE_STATUS T3 ON T3.GATE_STATUS_ID=T2.DELIVERABLE_STATUS_ID AND T3.MODULE_ID='QGATES' AND T3.KEY_PROCESS='DEL_RESP'
                  LEFT JOIN dbo.MAS_GATE_STATUS T4 ON T4.GATE_STATUS_ID=T2.ACCOUNTABLE_STATUS_ID AND T4.MODULE_ID='QGATES' AND T4.KEY_PROCESS='DEL_ACC'   
-                 WHERE CURRENT_QG_STATUS IN ('PCA', 'FEAS') AND [IsGeneratedInitial]=1 AND T1.IsLost_SF=0
+                 WHERE [IsGeneratedInitial]=1 AND T1.IsLost_SF=0 AND [IsAbandoned]=0 AND Is_Q_GATES=1
                  GROUP BY OPPORTUNITY_ID,OPPORTUNITY_LINE_ID,OPPORTUNITY_NAME,OPPORTUNITY_LNE_NAME,MATNR,DESCRIPTION,SAP_CUSTOMER,
                           CUST_NAME,SALES_ORGANIZATION,PRODUCT_CATEGORY,BUSINESS_UNIT,CURRENT_QG_STATUS,RELEASED_DATE,
-                          PIECES_1Y,PIECES_2Y,PIECES_3Y,PIECES_4Y,PRICE_1Y,PRICE_2Y,PRICE_3Y,PRICE_4Y,PRICE_CUR,RATE_VS_EUR,SOP,OWNER_SF,PARENT_NAME,SF_LINK,Priority";
+                          PIECES_1Y,PIECES_2Y,PIECES_3Y,PIECES_4Y,PIECES_5Y,PRICE_1Y,PRICE_2Y,PRICE_3Y,PRICE_4Y,PRICE_CUR,RATE_VS_EUR,SOP,OWNER_SF,PARENT_NAME,SF_LINK,Priority";
+            case Module_ID.Q_GATES_PR:
+                return $@"SELECT OPPORTUNITY_ID,
+                         OPPORTUNITY_LINE_ID,
+                         OPPORTUNITY_NAME,
+                         OPPORTUNITY_LNE_NAME,
+                         MATNR,DESCRIPTION,
+                         SAP_CUSTOMER,
+                         CUST_NAME,
+                         SALES_ORGANIZATION,
+                         PRODUCT_CATEGORY,
+                         BUSINESS_UNIT,
+                         CURRENT_QG_STATUS,
+                         RELEASED_DATE,
+                         PIECES_1Y,
+                         PIECES_2Y,
+                         PIECES_3Y,
+                         PIECES_4Y,
+                         PIECES_5Y,
+                         PRICE_1Y,PRICE_2Y,PRICE_3Y,PRICE_4Y,PRICE_CUR,RATE_VS_EUR,SOP,OWNER_SF,
+                         PARENT_NAME,SF_LINK,
+                         Priority,
+                         MIN(PLANNED_START_DATE)MIN_PLAN,
+                         MAX(PLANNED_END_DATE)MAX_PLAN,
+                         MIN(ACTUAL_START_DATE)MIN_ACTUAL,
+                         MAX(ACTUAL_END_DATE)MAX_ACTUAL,
+                         MIN(USER_START_DATE) MIN_USER,
+                         MAX(USER_FINISH_DATE)MAX_USER,
+                         COUNT(*) AS #_DELIVERABLES,
+                         (COUNT(*) - SUM(CASE T3.IS_FINAL_STATE WHEN 1 THEN 1 ELSE 0 END))PENDING_RESPONSIBLE,
+                         (COUNT(*)  - SUM(CASE T4.IS_FINAL_STATE WHEN 1 THEN 1 ELSE 0 END))PENDING_ACCOUNTANT
+                 FROM dbo.TRA_PROJECTS T1
+                 LEFT JOIN dbo.TRA_PROJECTS_DELIVERABLES T2 ON T2.OPP_LINE_ID=OPPORTUNITY_LINE_ID
+                 LEFT JOIN dbo.MAS_GATE_STATUS T3 ON T3.GATE_STATUS_ID=T2.DELIVERABLE_STATUS_ID AND T3.MODULE_ID='QGATES' AND T3.KEY_PROCESS='DEL_RESP'
+                 LEFT JOIN dbo.MAS_GATE_STATUS T4 ON T4.GATE_STATUS_ID=T2.ACCOUNTABLE_STATUS_ID AND T4.MODULE_ID='QGATES' AND T4.KEY_PROCESS='DEL_ACC'   
+                 WHERE [IsGeneratedInitial_PR]=1 AND T1.IsLost_SF=0 AND [IsAbandoned]=0 AND Is_Q_GATES_PR=1
+                 GROUP BY OPPORTUNITY_ID,OPPORTUNITY_LINE_ID,OPPORTUNITY_NAME,OPPORTUNITY_LNE_NAME,MATNR,DESCRIPTION,SAP_CUSTOMER,
+                          CUST_NAME,SALES_ORGANIZATION,PRODUCT_CATEGORY,BUSINESS_UNIT,CURRENT_QG_STATUS,RELEASED_DATE,
+                          PIECES_1Y,PIECES_2Y,PIECES_3Y,PIECES_4Y,PIECES_5Y,PRICE_1Y,PRICE_2Y,PRICE_3Y,PRICE_4Y,PRICE_CUR,RATE_VS_EUR,SOP,OWNER_SF,PARENT_NAME,SF_LINK,Priority";
+            default:
+                return string.Empty;
+        }
+                
     }
-        //TODO: AVOID HARDCODING GAYES & MODULE_ID (Module Id is in cosntatnt that should be called when we instance class
-        //TODO: DELIVERABLE FIGURES MUST BE ACCORDING CURRENT GATE
-
-        private string SQL_TRA_PROJECT_STATUS()
+            private string SQL_TRA_PROJECT_STATUS()
     {
 
         return $@"SELECT CURRENT_STATUS
