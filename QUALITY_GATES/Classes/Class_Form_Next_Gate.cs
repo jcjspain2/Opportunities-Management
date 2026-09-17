@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading.Tasks;
 using static QUALITY_GATES.Data.SqlConnectionFactory;
 
+namespace QUALITY_GATES.Classes;
 public partial class Class_Projects_Quality_Gates
 {
    // public async Task<OperationResult<List<MODEL_FORM_NEXT_GATE_ALLOCATION>>> Get_Next_Gate_Model(string OppLineId, string Gate_Id)

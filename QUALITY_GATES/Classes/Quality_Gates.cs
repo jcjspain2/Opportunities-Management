@@ -1,10 +1,11 @@
-namespace QUALITY_GATES.Classes;
+
 
 using GrupoPremo.Intranet.Library.IService;
 using Microsoft.Extensions.DependencyInjection;
 using QUALITY_GATES.Data;
 using QUALITY_GATES.Models;
 
+namespace QUALITY_GATES.Classes;
 public partial class Class_Projects_Quality_Gates
 {
     private readonly IDbConnectionFactory _db;

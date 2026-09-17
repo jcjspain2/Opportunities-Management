@@ -1,4 +1,4 @@
-﻿namespace QUALITY_GATES.Classes;
+﻿
 
 using GrupoPremo.Intranet.Library.Models;
 using Microsoft.Data.SqlClient;
@@ -15,6 +15,7 @@ using UtilidadesFichero;
 using static QUALITY_GATES.Data.SqlConnectionFactory;
 using static QUALITY_GATES.Tools.Static_Local_Functions;
 
+namespace QUALITY_GATES.Classes;
 public partial class Class_Projects_Quality_Gates
 {
 

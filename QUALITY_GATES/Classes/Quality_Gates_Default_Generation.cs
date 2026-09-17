@@ -1,4 +1,4 @@
-namespace QUALITY_GATES.Classes;
+
 
 using Microsoft.Data.SqlClient;
 using QUALITY_GATES.Data;
@@ -6,6 +6,8 @@ using QUALITY_GATES.Models;
 using System.Data;
 using System.Data.Common;
 using static QUALITY_GATES.Tools.Static_Local_Functions;
+
+namespace QUALITY_GATES.Classes;
 public partial class Class_Projects_Quality_Gates
 {
     public async Task<Return_SQL_Action> Generate_Next_Default_Gate(string OPP_LINE_ID, string USER_ID_WHO_REQUEST = "System",CancellationToken cancellationToken = default)
