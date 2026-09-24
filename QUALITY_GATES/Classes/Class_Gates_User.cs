@@ -147,113 +147,159 @@ public partial class Class_Projects_Quality_Gates
         });
 
     }
+    /// <summary>
+    /// Gets collaboratives allready set
+    /// </summary>
+    /// <param name="OPP_LINE_ID"></param>
+    /// <param name="STATUS_ID"></param>
+    /// <param name="GATE_ID"></param>
+    /// <param name="DELIVERABLE_ID"></param>
+    /// <param name="cancellationToken"></param>
+    /// <returns>List of user collaboratives ready to use in UI</returns>
+    public async Task<OperationResult<List<USERS_COLLABORATIVE>>> Get_Collaboratives_Deliverable(
+        string OPP_LINE_ID, string STATUS_ID, string GATE_ID, int DELIVERABLE_ID,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT OPP_LINE_ID, STATUS_ID, SGATE_ID, DELIVERABLE_ID, User_ID, User_Mail, RESP_COMMENT
+            FROM dbo.TRA_PROJECTS_DELIVERABLE_COOPERATION
+            WHERE OPP_LINE_ID = @OPP_LINE_ID
+              AND STATUS_ID   = @STATUS_ID
+              AND SGATE_ID    = @SGATE_ID
+              AND DELIVERABLE_ID = @DELIVERABLE_ID
+            """;
 
+        var parameters = new[]
+        {
+            new SqlParameter("@OPP_LINE_ID",    OPP_LINE_ID),
+            new SqlParameter("@STATUS_ID",      STATUS_ID),
+            new SqlParameter("@SGATE_ID",       GATE_ID),
+            new SqlParameter("@DELIVERABLE_ID", DELIVERABLE_ID)
+        };
+
+        var queryResult = await _db.GetDatatableFromSelectAsync(sql, parameters, cancellationToken: cancellationToken);
+
+        if (!queryResult.Success || queryResult.DTResults == null)
+            return OperationResult<List<USERS_COLLABORATIVE>>.Fail($"Error: {queryResult.Message}");
+
+        var resultList = new List<USERS_COLLABORATIVE>();
+        foreach (DataRow row in queryResult.DTResults.Rows)
+        {
+            resultList.Add(new USERS_COLLABORATIVE
+            {
+                UserId = GetString(row, "User_ID"),
+                Responsible_Task_Comment = GetString(row, "RESP_COMMENT")
+            });
+        }
+
+        return OperationResult<List<USERS_COLLABORATIVE>>.Ok(resultList);
+    }
     /// <summary>
     /// REturns all users ID .
     /// </summary>
     /// <param name="UserRequest">User logged into app that makes requests, restriction can be checked.</param>
     /// <returns>Return object USER_DETAILS, to display and choose</returns>
     public async Task<OperationResult<List<USERS_DETAILS>>> Get_Users_ID_All(string UserRequest)
+{
+CancellationToken cancellationToken = default;
+const string SQL_Users_Id_By_JobTitle = """
+             SELECT T1.samaccountname,T1.EmailAddress,T1.GivenName,T1.Surname,
+                         T1.DisplayName,T1.Title,T1.Department,T1.Office,
+                         T2.ManagerEmail,T2.FunManagerEmail,T2.State,JobRole,T2.jobTitle,employeeLevel,
+                         T3.JOB_TITLE_ID,T4.JOB_TITLE_DESCRIPTION
+             FROM dbo.MAS_AD_Users T1
+             LEFT JOIN dbo.MAS_USERS_CADENA T2 on T1.EmailAddress=T2.Email
+             LEFT JOIN dbo.MAS_JOB_TITLES_CADENA T3 ON T3.JOB_TITLE_CADENA=T2.jobTitle
+             LEFT JOIN dbo.MAS_JOB_TITLES T4 ON T3.JOB_TITLE_ID=T4.JOB_TITLE_ID
+             WHERE T1.Enabled=1 and T1.EmailAddress <> ''
+          """;
+var queryResult = await _db.GetDatatableFromSelectAsync(SQL_Users_Id_By_JobTitle,null, cancellationToken: cancellationToken);
+if (!queryResult.Success || queryResult.DTResults == null)
+    return OperationResult<List<USERS_DETAILS>>.Fail($"Error: {queryResult.Message}");
+
+if (queryResult.DTResults.Rows.Count == 0)
+    return OperationResult<List<USERS_DETAILS>>.Fail($"No users found.");
+
+try
+{
+    var resultList = new List<USERS_DETAILS>();
+    foreach (DataRow row in queryResult.DTResults.Rows)
     {
-        CancellationToken cancellationToken = default;
-        const string SQL_Users_Id_By_JobTitle = """
-                     SELECT T1.samaccountname,T1.EmailAddress,T1.GivenName,T1.Surname,
-                                 T1.DisplayName,T1.Title,T1.Department,T1.Office,
-                                 T2.ManagerEmail,T2.FunManagerEmail,T2.State,JobRole,T2.jobTitle,employeeLevel,
-                                 T3.JOB_TITLE_ID,T4.JOB_TITLE_DESCRIPTION
-                     FROM dbo.MAS_AD_Users T1
-                     LEFT JOIN dbo.MAS_USERS_CADENA T2 on T1.EmailAddress=T2.Email
-                     LEFT JOIN dbo.MAS_JOB_TITLES_CADENA T3 ON T3.JOB_TITLE_CADENA=T2.jobTitle
-                     LEFT JOIN dbo.MAS_JOB_TITLES T4 ON T3.JOB_TITLE_ID=T4.JOB_TITLE_ID
-                     WHERE T1.Enabled=1 and T1.EmailAddress <> ''
-                  """;
-        var queryResult = await _db.GetDatatableFromSelectAsync(SQL_Users_Id_By_JobTitle,null, cancellationToken: cancellationToken);
-        if (!queryResult.Success || queryResult.DTResults == null)
-            return OperationResult<List<USERS_DETAILS>>.Fail($"Error: {queryResult.Message}");
-
-        if (queryResult.DTResults.Rows.Count == 0)
-            return OperationResult<List<USERS_DETAILS>>.Fail($"No users found.");
-
-        try
+        resultList.Add(new USERS_DETAILS
         {
-            var resultList = new List<USERS_DETAILS>();
-            foreach (DataRow row in queryResult.DTResults.Rows)
-            {
-                resultList.Add(new USERS_DETAILS
-                {
-                    UserId = GetString(row, "samaccountname"),
-                    User_Display_Name = GetString(row, "DisplayName"),
-                    User_Q_GATES_Job_Title = GetString(row, "JOB_TITLE_DESCRIPTION"),
-                    User_Q_GATES_Job_Title_ID = GetString(row, "JOB_TITLE_ID"),
-                    User_Cadena_JobTitle = GetString(row, "jobTitle"),
-                    UserSite = GetString(row, "Office"),
-                    UserManager_Mail = GetString(row, "ManagerEmail"),
-                    UserManager_Functional_Mail = GetString(row, "FunManagerEmail"),
-                });
-            }
-            return OperationResult<List<USERS_DETAILS>>.Ok(resultList);
-        }
-        catch (Exception ex)
-        {
-            return OperationResult<List<USERS_DETAILS>>.Fail($"Error: {ex.Message}");
-        }
-       
+            UserId = GetString(row, "samaccountname"),
+            User_Display_Name = GetString(row, "DisplayName"),
+            User_Q_GATES_Job_Title = GetString(row, "JOB_TITLE_DESCRIPTION"),
+            User_Q_GATES_Job_Title_ID = GetString(row, "JOB_TITLE_ID"),
+            User_Cadena_JobTitle = GetString(row, "jobTitle"),
+            UserSite = GetString(row, "Office"),
+            UserManager_Mail = GetString(row, "ManagerEmail"),
+            UserManager_Functional_Mail = GetString(row, "FunManagerEmail"),
+        });
     }
+    return OperationResult<List<USERS_DETAILS>>.Ok(resultList);
+}
+catch (Exception ex)
+{
+    return OperationResult<List<USERS_DETAILS>>.Fail($"Error: {ex.Message}");
+}
+
+}
 
 
-    /// <summary>
-    /// REturns all users ID that belong to a given job title.
-    /// </summary>
-    /// <param name="UserRequest">User logged into app that makes requests, restriction can be checked.</param>
-    /// <param name="JobTitle">Job Title Target where User Id should be allocated</param>
-    /// <returns>Return object USER_DETAILS, to display and choose</returns>
-    public async Task<OperationResult<List<USERS_DETAILS>>> Get_Users_ID_By_JobTitle(string UserRequest, string JobTitle)
+/// <summary>
+/// REturns all users ID that belong to a given job title.
+/// </summary>
+/// <param name="UserRequest">User logged into app that makes requests, restriction can be checked.</param>
+/// <param name="JobTitle">Job Title Target where User Id should be allocated</param>
+/// <returns>Return object USER_DETAILS, to display and choose</returns>
+public async Task<OperationResult<List<USERS_DETAILS>>> Get_Users_ID_By_JobTitle(string UserRequest, string JobTitle)
+{
+CancellationToken cancellationToken = default;
+const string SQL_Users_Id_By_JobTitle = """
+             SELECT T1.samaccountname,T1.EmailAddress,T1.GivenName,T1.Surname,
+                         T1.DisplayName,T1.Title,T1.Department,T1.Office,
+                         T2.ManagerEmail,T2.FunManagerEmail,T2.State,JobRole,T2.jobTitle,employeeLevel,
+                         T3.JOB_TITLE_ID,T4.JOB_TITLE_DESCRIPTION
+             FROM dbo.MAS_AD_Users T1
+             LEFT JOIN dbo.MAS_USERS_CADENA T2 on T1.EmailAddress=T2.Email
+             LEFT JOIN dbo.MAS_JOB_TITLES_CADENA T3 ON T3.JOB_TITLE_CADENA=T2.jobTitle
+             LEFT JOIN dbo.MAS_JOB_TITLES T4 ON T3.JOB_TITLE_ID=T4.JOB_TITLE_ID
+             WHERE T1.Enabled=1 and T1.EmailAddress <> '' AND T3.JOB_TITLE_ID=@JOB_TITLE_ID
+          """;
+var parameters = new[] { new SqlParameter("@JOB_TITLE_ID", JobTitle) };
+
+var queryResult = await _db.GetDatatableFromSelectAsync(SQL_Users_Id_By_JobTitle, parameters, cancellationToken: cancellationToken);
+if (!queryResult.Success || queryResult.DTResults == null)
+    return OperationResult<List<USERS_DETAILS>>.Fail($"Error: {queryResult.Message}");
+
+if (queryResult.DTResults.Rows.Count == 0)
+    return OperationResult<List<USERS_DETAILS>>.Fail($"No users found for job title '{JobTitle}'.");
+
+try
+{
+    var resultList = new List<USERS_DETAILS>();
+    foreach (DataRow row in queryResult.DTResults.Rows)
     {
-        CancellationToken cancellationToken = default;
-        const string SQL_Users_Id_By_JobTitle = """
-                     SELECT T1.samaccountname,T1.EmailAddress,T1.GivenName,T1.Surname,
-                                 T1.DisplayName,T1.Title,T1.Department,T1.Office,
-                                 T2.ManagerEmail,T2.FunManagerEmail,T2.State,JobRole,T2.jobTitle,employeeLevel,
-                                 T3.JOB_TITLE_ID,T4.JOB_TITLE_DESCRIPTION
-                     FROM dbo.MAS_AD_Users T1
-                     LEFT JOIN dbo.MAS_USERS_CADENA T2 on T1.EmailAddress=T2.Email
-                     LEFT JOIN dbo.MAS_JOB_TITLES_CADENA T3 ON T3.JOB_TITLE_CADENA=T2.jobTitle
-                     LEFT JOIN dbo.MAS_JOB_TITLES T4 ON T3.JOB_TITLE_ID=T4.JOB_TITLE_ID
-                     WHERE T1.Enabled=1 and T1.EmailAddress <> '' AND T3.JOB_TITLE_ID=@JOB_TITLE_ID
-                  """;
-        var parameters = new[] { new SqlParameter("@JOB_TITLE_ID", JobTitle) };
-
-        var queryResult = await _db.GetDatatableFromSelectAsync(SQL_Users_Id_By_JobTitle, parameters, cancellationToken: cancellationToken);
-        if (!queryResult.Success || queryResult.DTResults == null)
-            return OperationResult<List<USERS_DETAILS>>.Fail($"Error: {queryResult.Message}");
-
-        if (queryResult.DTResults.Rows.Count == 0)
-            return OperationResult<List<USERS_DETAILS>>.Fail($"No users found for job title '{JobTitle}'.");
-
-        try
+        resultList.Add(new USERS_DETAILS
         {
-            var resultList = new List<USERS_DETAILS>();
-            foreach (DataRow row in queryResult.DTResults.Rows)
-            {
-                resultList.Add(new USERS_DETAILS
-                {
-                    UserId = GetString(row, "samaccountname"),
-                    User_Display_Name = GetString(row, "DisplayName"),
-                    User_Q_GATES_Job_Title = GetString(row, "JOB_TITLE_DESCRIPTION"),
-                    User_Q_GATES_Job_Title_ID = GetString(row, "JOB_TITLE_ID"),
-                    User_Cadena_JobTitle = GetString(row, "jobTitle"),
-                    UserSite = GetString(row, "Office"),
-                    UserManager_Mail = GetString(row, "ManagerEmail"),
-                    UserManager_Functional_Mail = GetString(row, "FunManagerEmail"),
-                });
-            }
-            return OperationResult<List<USERS_DETAILS>>.Ok(resultList);
-        }
-        catch (Exception ex)
-        {
-            return OperationResult<List<USERS_DETAILS>>.Fail($"Error: {ex.Message}");
-        }
+            UserId = GetString(row, "samaccountname"),
+            User_Display_Name = GetString(row, "DisplayName"),
+            User_Q_GATES_Job_Title = GetString(row, "JOB_TITLE_DESCRIPTION"),
+            User_Q_GATES_Job_Title_ID = GetString(row, "JOB_TITLE_ID"),
+            User_Cadena_JobTitle = GetString(row, "jobTitle"),
+            UserSite = GetString(row, "Office"),
+            UserManager_Mail = GetString(row, "ManagerEmail"),
+            UserManager_Functional_Mail = GetString(row, "FunManagerEmail"),
+        });
     }
+    return OperationResult<List<USERS_DETAILS>>.Ok(resultList);
+}
+catch (Exception ex)
+{
+    return OperationResult<List<USERS_DETAILS>>.Fail($"Error: {ex.Message}");
+}
+}
 
 
 

@@ -245,7 +245,6 @@ public class USERS_COLLABORATIVE
 {
     public string UserId { get; set; } = string.Empty;
     public string Responsible_Task_Comment { get; set; } = string.Empty;
-    
 }
 
 
@@ -290,6 +289,6 @@ public static class PriorityExtensions
         {
             return (Priority)value;
         }
-        throw new ArgumentException($"Valor de prioridad no válido: {value}");
+        throw new ArgumentException($"Valor de prioridad no vï¿½lido: {value}");
     }
 }

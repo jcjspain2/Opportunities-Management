@@ -3,7 +3,7 @@ using System.Data;
 
 namespace QUALITY_GATES.Data;
 
-public enum DatabaseTarget { SRM, DMS }
+public enum DatabaseTarget { SRM = 0, QUALITY_GATES_DB_PROD = 1, DMS = 2 }
 
 public interface IDbConnectionFactory
 {

@@ -20,13 +20,14 @@ public class SqlConnectionFactory : IDbConnectionFactory
 
     private string ResolveConnectionString(DatabaseTarget db)
     {
-        if (db == DatabaseTarget.DMS)
+        return db switch
         {
-            if (string.IsNullOrEmpty(_connectionStringDMS))
-                throw new InvalidOperationException("Connection string 'DMSConnection' is not configured. Add it to appsettings.local.json.");
-            return _connectionStringDMS;
-        }
-        return _connectionStringSRM;
+            DatabaseTarget.DMS => !string.IsNullOrEmpty(_connectionStringDMS)
+                ? _connectionStringDMS
+                : throw new InvalidOperationException("Connection string 'DMSConnection' is not configured. Add it to appsettings.local.json."),
+            DatabaseTarget.QUALITY_GATES_DB_PROD => _connectionStringSRM,
+            _ => _connectionStringSRM
+        };
     }
 
     public async Task<SqlConnection> CreateOpenConnectionAsync(DatabaseTarget db = DatabaseTarget.SRM, CancellationToken cancellationToken = default)
