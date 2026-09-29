@@ -40,7 +40,7 @@ public partial class Class_Projects_Quality_Gates
         DataRow? nextGateRow = null;
         foreach (DataRow row in queryResult.DTResults.Rows)
         {
-            if (row["CURRENT_STATUS"].ToString().Trim() == "NO_GEN")
+            if (row["CURRENT_STATUS"]?.ToString()?.Trim() == "NO_GEN")
             {
                 nextGateRow = row;
                 break;

@@ -469,7 +469,7 @@ namespace QUALITY_GATES.Classes
 
                 var resultDelNotFinalState = await _db.GetDatatableFromSelectAsync(sqlDelFinalState, ParamsStatus(), cancellationToken: cancellationToken);
 
-                if (!resultDelNotFinalState.Success)
+                if (!resultDelNotFinalState.Success || resultDelNotFinalState.DTResults == null)
                     return OperationResult<bool>.Fail($"Error: {result.Message}");
                    
 

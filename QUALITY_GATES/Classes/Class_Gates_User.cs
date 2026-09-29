@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlTypes;
 using System.Diagnostics;
+using System.Reflection.Metadata;
 using System.Runtime.InteropServices;
 using System.Threading;
 using UtilidadesFichero;
@@ -22,25 +23,65 @@ public partial class Class_Projects_Quality_Gates
     /// <summary>
     /// Allow to get current situation regarding deliverables allocations not finished.
     /// </summary>
-    private async Task<OperationResult<bool>> GetDashboardCurrentAllocations(CancellationToken cancellationToken =default)
+    private async Task<OperationResult<bool>> GetDashboardCurrentAllocations(Module_ID CurrentModule)
     {
-        //TODO: Esto no va a servir para usar en la gestión dd proyectos
-        const string sql_KEY_PROCESS_CHECK = @""" 
-                  SELECT OPP_LINE_ID,STATUS_ID,SGATE_ID,DELIVERABLE_ID,RESPONSIBLE_JOB_ID,ACCOUNTABLE_JOB_ID,RESPONSIBLE_USER_ID,ACCOUNTABLE_USER_ID,
-                         T4.JOB_TITLE_DESCRIPTION,T5.JOB_TITLE_DESCRIPTION,
-                         T2.IS_INITIAL_STATE,T2.IS_PENDING_REVIEW,T2.IS_IN_PROGRESS,
-                         T3.IS_INITIAL_STATE,T3.IS_PENDING_REVIEW,T3.IS_IN_PROGRESS
-                  FROM dbo.TRA_PROJECTS_DELIVERABLES T1
-                  JOIN dbo.TRA_PROJECTS TP ON TP.OPPORTUNITY_LINE_ID=T1.OPP_LINE_ID AND IsLost_SF=0
-                  JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID='Q_GATES' AND T2.KEY_PROCESS='DEL_RESP' AND T1.DELIVERABLE_STATUS_ID=T2.GATE_STATUS_ID 
-                  JOIN dbo.MAS_GATE_STATUS T3 ON T3.MODULE_ID='Q_GATES' AND T3.KEY_PROCESS='DEL_ACC' AND T1.DELIVERABLE_STATUS_ID=T3.GATE_STATUS_ID 
-                  JOIN dbo.MAS_JOB_TITLES T4 ON T4.JOB_TITLE_ID =T1.RESPONSIBLE_JOB_ID
-                  JOIN dbo.MAS_JOB_TITLES T5 ON T5.JOB_TITLE_ID =T1.ACCOUNTABLE_JOB_ID
-                  WHERE T2.IS_FINAL_STATE=0 OR T3.IS_FINAL_STATE=0
-                   """;
+        string Sql;
+        switch (CurrentModule)
+        {
+            case Module_ID.Q_GATES:
+                Sql = @" SELECT TP.OPPORTUNITY_NAME,TS.STATUS_IDT1.DELIVERABLE_NAME,RESPONSIBLE_USER_ID,
+                              ACCOUNTABLE_USER_ID,
+                              T4.JOB_TITLE_DESCRIPTION JOB_TITLE_RESP,
+                              T5.JOB_TITLE_DESCRIPTION JOB_TITLE_ACC,
+                              T2.IS_INITIAL_STATE RESP_INITIAL_STATE,
+                              T2.IS_PENDING_REVIEW RESP_PENDING_REVIEW,
+                              T2.IS_IN_PROGRESS RESP_IN_PROGRESS,
+                              T3.IS_INITIAL_STATE ACC_INITIAL_STATE,
+                              T3.IS_PENDING_REVIEW ACC_PENDING_STATE,
+                              T3.IS_IN_PROGRESS ACC_IN_PROGRESS,
+                              EFFORT_RATE RESP_EFFORT_RATE
+                       FROM dbo.TRA_PROJECTS_DELIVERABLES T1
+                       JOIN dbo.TRA_PROJECTS TP ON TP.OPPORTUNITY_LINE_ID=T1.OPP_LINE_ID AND TP.IsLost_SF=0 AND TP.IsAbandoned=0 AND TP.Is_Q_GATES=1
+                       JOIN dbo.TRA_PROJECTS_STATUS AS TS ON TS.OPP_LINE_ID=T1.OPP_LINE_ID AND TS.STATUS_ID=T1.STATUS_ID AND TS.MODULE_ID='Q_GATES'
+                       JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID='Q_GATES' AND T2.KEY_PROCESS='DEL_RESP' AND T1.DELIVERABLE_STATUS_ID=T2.GATE_STATUS_ID
+                       JOIN dbo.MAS_GATE_STATUS T3 ON T3.MODULE_ID='Q_GATES' AND T3.KEY_PROCESS='DEL_ACC' AND T1.DELIVERABLE_STATUS_ID=T3.GATE_STATUS_ID
+                       JOIN dbo.MAS_JOB_TITLES T4 ON T4.JOB_TITLE_ID =T1.RESPONSIBLE_JOB_ID
+                       JOIN dbo.MAS_JOB_TITLES T5 ON T5.JOB_TITLE_ID =T1.ACCOUNTABLE_JOB_ID
+                       WHERE (T2.IS_FINAL_STATE=0 OR T3.IS_FINAL_STATE=0)";
+                break;
+            case Module_ID.Q_GATES_PR:
+            default:
+                Sql = $@"
+               SELECT TP.OPPORTUNITY_NAME,TS.STATUS_ID,T1.DELIVERABLE_NAME,RESPONSIBLE_USER_ID,
+                      ACCOUNTABLE_USER_ID,
+                      T4.JOB_TITLE_DESCRIPTION JOB_TITLE_RESP,
+                      T5.JOB_TITLE_DESCRIPTION JOB_TITLE_ACC,
+                      T2.IS_INITIAL_STATE RESP_INITIAL_STATE,
+                      T2.IS_PENDING_REVIEW RESP_PENDING_REVIEW,
+                      T2.IS_IN_PROGRESS RESP_IN_PROGRESS,
+                      T3.IS_INITIAL_STATE ACC_INITIAL_STATE,
+                      T3.IS_PENDING_REVIEW ACC_PENDING_STATE,
+                      T3.IS_IN_PROGRESS ACC_IN_PROGRESS,
+                      EFFORT_RATE RESP_EFFORT_RATE
+               FROM dbo.TRA_PROJECTS_DELIVERABLES T1
+               JOIN dbo.TRA_PROJECTS TP ON TP.OPPORTUNITY_LINE_ID=T1.OPP_LINE_ID AND TP.IsLost_SF=0 AND TP.IsAbandoned=0 AND TP.Is_Q_GATES_PR=1 
+               JOIN dbo.TRA_PROJECTS_STATUS AS TS ON TS.OPP_LINE_ID=T1.OPP_LINE_ID AND TS.STATUS_ID=T1.STATUS_ID AND TS.MODULE_ID='Q_GATES'
+               JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID='Q_GATES' AND T2.KEY_PROCESS='DEL_RESP' AND T1.DELIVERABLE_STATUS_ID=T2.GATE_STATUS_ID 
+               JOIN dbo.MAS_GATE_STATUS T3 ON T3.MODULE_ID='Q_GATES' AND T3.KEY_PROCESS='DEL_ACC' AND T1.DELIVERABLE_STATUS_ID=T3.GATE_STATUS_ID 
+               JOIN dbo.MAS_JOB_TITLES T4 ON T4.JOB_TITLE_ID =T1.RESPONSIBLE_JOB_ID
+               JOIN dbo.MAS_JOB_TITLES T5 ON T5.JOB_TITLE_ID =T1.ACCOUNTABLE_JOB_ID
+               WHERE (T2.IS_FINAL_STATE=0 OR T3.IS_FINAL_STATE=0)";
+                break;
+        }
 
-        return  OperationResult<bool>.Fail($"Error");
+        if (string.IsNullOrEmpty(Sql))
+            return OperationResult<bool>.Fail($"Module '{CurrentModule}' has no SQL defined yet.");
 
+        var queryResult = await _db.GetDatatableFromSelectAsync(Sql, null);
+        if (!queryResult.Success)
+            return OperationResult<bool>.Fail($"Error: {queryResult.Message}");
+
+        return OperationResult<bool>.Ok(true);
     }
     /// <summary>
     /// Checks whether the requesting user's job title is authorized for a given key process.

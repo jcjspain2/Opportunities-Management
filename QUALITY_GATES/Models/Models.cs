@@ -17,6 +17,15 @@ public class PROJECTS_HEADER
     public string PRODUCT_CATEGORY { get; set; } = string.Empty;
     public string OWNER { get; set; } = string.Empty;
     public string PROJECT_SALES_FORCE_LINK { get; set; } = string.Empty;
+    // SAP  data
+    public string MATNR { get; set; } = string.Empty;
+    public string MATNR_DESCRIPTION { get; set; } = string.Empty;
+    // END SAP DATA
+    // PLANTS RELATED
+    public string PLANT_MANUFACTURING { get; set; } = string.Empty;
+    public string PLANT_SAMPLES { get; set; } = string.Empty;
+    public string PLANT_DESIGN { get; set; } = string.Empty;
+    // END PLANTS RELATED
     public DateOnly SOP { get; set; } = DateOnly.MinValue;
     public DateOnly RELEASED_DATE { get; set; } = DateOnly.MinValue;
     public int AGEING_DAYS { get; set; } = 0;
@@ -45,6 +54,7 @@ public class PROJECT_DETAIL
     public string OPP_NAME { get; set; } = string.Empty;
     public string OPP_LINE_NAME { get; set; } = string.Empty;
     public string CURRENT_GATE_ID { get; set; } = string.Empty;
+    public string CURRENT_GATE_DESCRIPTION { get; set; } = string.Empty;
     public string PATH_TO_SAVE_FILES { get; set; } = string.Empty;
     public string LINK_TO_PDCC { get; set; } = string.Empty;
     public List<GATES_ACTIONS> List_Actions { get; set; } = new();

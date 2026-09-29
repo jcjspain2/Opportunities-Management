@@ -605,9 +605,46 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
 
 
     }
+    /// <summary>
+    /// Marks a project as abandoned in TRA_PROJECTS. Only users whose job title is authorized
+    /// under keyprocess @ABANDON in MAS_JOB_TITLES_RESTRICTIONS may execute this operation.
+    /// </summary>
+    /// <param name="Opp_LINE_ID">Opportunity line ID of the project to abandon.</param>
+    /// <param name="UserWhoRequest">samaccountname of the user requesting the operation. Pass "System" to bypass the authorization check.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Ok(true) if the project was successfully abandoned; Fail with error message otherwise.</returns>
+    public async Task<OperationResult<bool>> AbandonProject(string Opp_LINE_ID, string UserWhoRequest, CancellationToken cancellationToken = default)
+    {
+        if (UserWhoRequest != "System")
+        {
+            var authResult = await Get_KeyProcess_Job_title_Restriction("@ABANDON", UserWhoRequest, cancellationToken);
+            if (!authResult.Success)
+                return OperationResult<bool>.Fail(authResult.ErrorMessage);
+        }
 
-    public async Task<OperationResult<List<PROJECTS_HEADER>>> Get_Projects_Header_Details()
+        if (string.IsNullOrWhiteSpace(Opp_LINE_ID))
+            return OperationResult<bool>.Fail("Project ID is required.");
 
+        const string sql = @"UPDATE dbo.TRA_PROJECTS SET IsAbandoned = 1 WHERE OPPORTUNITY_LINE_ID = @OppLineId";
+        var parameters = new[] { new SqlParameter("@OppLineId", Opp_LINE_ID.Trim()) };
+
+        var result = await _db.NonQueryDataToSQLServer(sql, parameters, cancellationToken: cancellationToken);
+
+        if (!result.Success)
+            return OperationResult<bool>.Fail(result.Message);
+
+        if (result.RecordsAffected == 0)
+            return OperationResult<bool>.Fail($"Project '{Opp_LINE_ID}' not found or already abandoned.");
+
+        return OperationResult<bool>.Ok(true);
+    }
+    /// <summary>
+    /// Gets model with all project from current ModuleId Running
+    /// </summary>
+    /// <param name="is_Abandoned">True Display project abandoned , false alive projects</param>
+    /// <returns>Model with projects fits requirement given parameters</returns>
+    public async Task<OperationResult<List<PROJECTS_HEADER>>> Get_Projects_Header_Details(bool is_Abandoned=false)
+        // Is abandoned means project is dead in Database
     {
         CancellationToken cancellationToken = default;
         // This is default page of the program when an user enteres here we need to check if any project is initial in order to generate 
@@ -636,7 +673,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
         List<PROJECTS_HEADER> currentprojectList = new List<PROJECTS_HEADER>();
         try
         {
-            var queryResult = await _db.GetDatatableFromSelectAsync(SQL_TRA_PROJECTS(_MODULE_ID_ENUM), null, cancellationToken: cancellationToken);
+            var queryResult = await _db.GetDatatableFromSelectAsync(SQL_TRA_PROJECTS(_MODULE_ID_ENUM, is_Abandoned), null, cancellationToken: cancellationToken);
             if (!queryResult.Success || queryResult.DTResults == null)
             { return OperationResult<List<PROJECTS_HEADER>>.Fail($"Error : {queryResult.Message}");};
             // Here we need to feed objects
@@ -667,6 +704,11 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                     CUST_SAP_CODE = GetString(row, "SAP_CUSTOMER"),
                     CUST_PARENT = GetString(row, "PARENT_NAME"),
                     SOP = GetDateOnly(row, "SOP"),
+                    MATNR = GetString(row,"MATNR"),
+                    MATNR_DESCRIPTION = GetString(row,"DESCRIPTION"),
+                    PLANT_MANUFACTURING= GetString(row, "MANUFACTURE_CENTER"),
+                    PLANT_SAMPLES = GetString(row, "SAMPLES_CENTER"),
+                    PLANT_DESIGN= GetString(row, "DESIGN_CENTER"),
                     CURRENT_GATE_ID = GetString(row, "CURRENT_QG_STATUS"),
                     TOTAL_DELIVERABLES = GetInt(row, "#_DELIVERABLES"),
                     TOTAL_DELIVERABLES_PENDING_OWNER = GetInt(row, "PENDING_RESPONSIBLE"),
@@ -709,7 +751,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                       { new SqlParameter("@ModuleId", _MODULE_ID),
                         new SqlParameter("@OppLineId", GetString(row, "OPPORTUNITY_LINE_ID"))};
                 var queryResultSt = await _db.GetDatatableFromSelectAsync(sqlNextGate, parametersNextGate, cancellationToken: cancellationToken);
-                if (!queryResultSt.Success || queryResult.DTResults == null)
+                if (!queryResultSt.Success || queryResultSt.DTResults == null)
                 { return OperationResult<List<PROJECTS_HEADER>>.Fail($"Error inesperado: {queryResultSt.Message}"); }
                 PROJECT_STATUS CurStatus;
               
@@ -829,97 +871,82 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                 return string.Empty;
         }
     }
-    private string SQL_TRA_PROJECTS(Module_ID CurrentModule)
+    private string SQL_TRA_PROJECTS(Module_ID CurrentModule, bool isAbandoned)
     {
-        switch (CurrentModule)
+        string WhereClause = string.Empty;
+                switch (CurrentModule)
         {
+           
             case Module_ID.Q_GATES:
-                return $@"SELECT OPPORTUNITY_ID,
-                         OPPORTUNITY_LINE_ID,
-                         OPPORTUNITY_NAME,
-                         OPPORTUNITY_LNE_NAME,
-                         MATNR,DESCRIPTION,
-                         SAP_CUSTOMER,
-                         CUST_NAME,
-                         SALES_ORGANIZATION,
-                         PRODUCT_CATEGORY,
-                         BUSINESS_UNIT,
-                         CURRENT_QG_STATUS,
-                         RELEASED_DATE,
-                         PIECES_1Y,
-                         PIECES_2Y,
-                         PIECES_3Y,
-                         PIECES_4Y,
-                         PIECES_5Y,
-                         PRICE_1Y,PRICE_2Y,PRICE_3Y,PRICE_4Y,PRICE_CUR,RATE_VS_EUR,SOP,OWNER_SF,
-                         PARENT_NAME,SF_LINK,
-                         Priority,
-                         MIN(PLANNED_START_DATE)MIN_PLAN,
-                         MAX(PLANNED_END_DATE)MAX_PLAN,
-                         MIN(ACTUAL_START_DATE)MIN_ACTUAL,
-                         MAX(ACTUAL_END_DATE)MAX_ACTUAL,
-                         MIN(USER_START_DATE) MIN_USER,
-                         MAX(USER_FINISH_DATE)MAX_USER,
-                         COUNT(*) AS #_DELIVERABLES,
-                         (COUNT(*) - SUM(CASE T3.IS_FINAL_STATE WHEN 1 THEN 1 ELSE 0 END))PENDING_RESPONSIBLE,
-                         (COUNT(*)  - SUM(CASE T4.IS_FINAL_STATE WHEN 1 THEN 1 ELSE 0 END))PENDING_ACCOUNTANT
-                 FROM dbo.TRA_PROJECTS T1
-                 LEFT JOIN dbo.TRA_PROJECTS_DELIVERABLES T2 ON T2.OPP_LINE_ID=OPPORTUNITY_LINE_ID
-                 LEFT JOIN dbo.MAS_GATE_STATUS T3 ON T3.GATE_STATUS_ID=T2.DELIVERABLE_STATUS_ID AND T3.MODULE_ID='QGATES' AND T3.KEY_PROCESS='DEL_RESP'
-                 LEFT JOIN dbo.MAS_GATE_STATUS T4 ON T4.GATE_STATUS_ID=T2.ACCOUNTABLE_STATUS_ID AND T4.MODULE_ID='QGATES' AND T4.KEY_PROCESS='DEL_ACC'   
-                 WHERE [IsGeneratedInitial]=1 AND T1.IsLost_SF=0 AND [IsAbandoned]=0 AND Is_Q_GATES=1
-                 GROUP BY OPPORTUNITY_ID,OPPORTUNITY_LINE_ID,OPPORTUNITY_NAME,OPPORTUNITY_LNE_NAME,MATNR,DESCRIPTION,SAP_CUSTOMER,
-                          CUST_NAME,SALES_ORGANIZATION,PRODUCT_CATEGORY,BUSINESS_UNIT,CURRENT_QG_STATUS,RELEASED_DATE,
-                          PIECES_1Y,PIECES_2Y,PIECES_3Y,PIECES_4Y,PIECES_5Y,PRICE_1Y,PRICE_2Y,PRICE_3Y,PRICE_4Y,PRICE_CUR,RATE_VS_EUR,SOP,OWNER_SF,PARENT_NAME,SF_LINK,Priority";
+                if (isAbandoned)
+                {
+                    WhereClause = $@" WHERE [IsGeneratedInitial]=1 AND T1.IsLost_SF=1 AND [IsAbandoned]=1 AND Is_Q_GATES=1";
+                
+                }
+                WhereClause = $@" WHERE[IsGeneratedInitial]=1 AND T1.IsLost_SF=0 AND [IsAbandoned]=0 AND Is_Q_GATES=1";
+                break;
             case Module_ID.Q_GATES_PR:
-                return $@"SELECT OPPORTUNITY_ID,
-                         OPPORTUNITY_LINE_ID,
-                         OPPORTUNITY_NAME,
-                         OPPORTUNITY_LNE_NAME,
-                         MATNR,DESCRIPTION,
-                         SAP_CUSTOMER,
-                         CUST_NAME,
-                         SALES_ORGANIZATION,
-                         PRODUCT_CATEGORY,
-                         BUSINESS_UNIT,
-                         CURRENT_QG_STATUS,
-                         RELEASED_DATE,
-                         PIECES_1Y,
-                         PIECES_2Y,
-                         PIECES_3Y,
-                         PIECES_4Y,
-                         PIECES_5Y,
-                         PRICE_1Y,PRICE_2Y,PRICE_3Y,PRICE_4Y,PRICE_CUR,RATE_VS_EUR,SOP,OWNER_SF,
-                         PARENT_NAME,SF_LINK,
-                         Priority,
-                         MIN(PLANNED_START_DATE)MIN_PLAN,
-                         MAX(PLANNED_END_DATE)MAX_PLAN,
-                         MIN(ACTUAL_START_DATE)MIN_ACTUAL,
-                         MAX(ACTUAL_END_DATE)MAX_ACTUAL,
-                         MIN(USER_START_DATE) MIN_USER,
-                         MAX(USER_FINISH_DATE)MAX_USER,
-                         COUNT(*) AS #_DELIVERABLES,
-                         (COUNT(*) - SUM(CASE T3.IS_FINAL_STATE WHEN 1 THEN 1 ELSE 0 END))PENDING_RESPONSIBLE,
-                         (COUNT(*)  - SUM(CASE T4.IS_FINAL_STATE WHEN 1 THEN 1 ELSE 0 END))PENDING_ACCOUNTANT
-                 FROM dbo.TRA_PROJECTS T1
-                 LEFT JOIN dbo.TRA_PROJECTS_DELIVERABLES T2 ON T2.OPP_LINE_ID=OPPORTUNITY_LINE_ID
-                 LEFT JOIN dbo.MAS_GATE_STATUS T3 ON T3.GATE_STATUS_ID=T2.DELIVERABLE_STATUS_ID AND T3.MODULE_ID='QGATES' AND T3.KEY_PROCESS='DEL_RESP'
-                 LEFT JOIN dbo.MAS_GATE_STATUS T4 ON T4.GATE_STATUS_ID=T2.ACCOUNTABLE_STATUS_ID AND T4.MODULE_ID='QGATES' AND T4.KEY_PROCESS='DEL_ACC'   
-                 WHERE [IsGeneratedInitial_PR]=1 AND T1.IsLost_SF=0 AND [IsAbandoned]=0 AND Is_Q_GATES_PR=1
-                 GROUP BY OPPORTUNITY_ID,OPPORTUNITY_LINE_ID,OPPORTUNITY_NAME,OPPORTUNITY_LNE_NAME,MATNR,DESCRIPTION,SAP_CUSTOMER,
-                          CUST_NAME,SALES_ORGANIZATION,PRODUCT_CATEGORY,BUSINESS_UNIT,CURRENT_QG_STATUS,RELEASED_DATE,
-                          PIECES_1Y,PIECES_2Y,PIECES_3Y,PIECES_4Y,PIECES_5Y,PRICE_1Y,PRICE_2Y,PRICE_3Y,PRICE_4Y,PRICE_CUR,RATE_VS_EUR,SOP,OWNER_SF,PARENT_NAME,SF_LINK,Priority";
+                if (isAbandoned)
+                {
+                    WhereClause = $@" WHERE [IsGeneratedInitial_PR]=1 AND T1.IsLost_SF=0 AND [IsAbandoned]=1 AND Is_Q_GATES_PR=1";
+                }
+                WhereClause = $@" WHERE [IsGeneratedInitial_PR]=1 AND T1.IsLost_SF=0 AND [IsAbandoned]=0 AND Is_Q_GATES_PR=1";
+                break;
             default:
                 return string.Empty;
         }
-                
+        string MainSql = $@"SELECT OPPORTUNITY_ID,
+                         OPPORTUNITY_LINE_ID,
+                         OPPORTUNITY_NAME,
+                         OPPORTUNITY_LNE_NAME,
+                         MATNR,
+                         DESCRIPTION,
+                         SAP_CUSTOMER,
+                         CUST_NAME,
+                         SALES_ORGANIZATION,
+                         PRODUCT_CATEGORY,
+                         BUSINESS_UNIT,
+                         CURRENT_QG_STATUS,
+                         RELEASED_DATE,
+                         SAMPLES_CENTER,
+                         DESIGN_CENTER,
+                         MANUFACTURE_CENTER,
+                         PIECES_1Y,
+                         PIECES_2Y,
+                         PIECES_3Y,
+                         PIECES_4Y,
+                         PIECES_5Y,
+                         PRICE_1Y,PRICE_2Y,PRICE_3Y,PRICE_4Y,PRICE_CUR,RATE_VS_EUR,SOP,OWNER_SF,
+                         PARENT_NAME,SF_LINK,
+                         Priority,
+                         MIN(PLANNED_START_DATE)MIN_PLAN,
+                         MAX(PLANNED_END_DATE)MAX_PLAN,
+                         MIN(ACTUAL_START_DATE)MIN_ACTUAL,
+                         MAX(ACTUAL_END_DATE)MAX_ACTUAL,
+                         MIN(USER_START_DATE) MIN_USER,
+                         MAX(USER_FINISH_DATE)MAX_USER,
+                         COUNT(*) AS #_DELIVERABLES,
+                         (COUNT(*) - SUM(CASE T3.IS_FINAL_STATE WHEN 1 THEN 1 ELSE 0 END))PENDING_RESPONSIBLE,
+                         (COUNT(*)  - SUM(CASE T4.IS_FINAL_STATE WHEN 1 THEN 1 ELSE 0 END))PENDING_ACCOUNTANT
+                 FROM dbo.TRA_PROJECTS T1
+                 LEFT JOIN dbo.TRA_PROJECTS_DELIVERABLES T2 ON T2.OPP_LINE_ID=OPPORTUNITY_LINE_ID
+                 LEFT JOIN dbo.MAS_GATE_STATUS T3 ON T3.GATE_STATUS_ID=T2.DELIVERABLE_STATUS_ID AND T3.MODULE_ID='QGATES' AND T3.KEY_PROCESS='DEL_RESP'
+                 LEFT JOIN dbo.MAS_GATE_STATUS T4 ON T4.GATE_STATUS_ID=T2.ACCOUNTABLE_STATUS_ID AND T4.MODULE_ID='QGATES' AND T4.KEY_PROCESS='DEL_ACC'   
+                 {WhereClause}
+                 GROUP BY OPPORTUNITY_ID,OPPORTUNITY_LINE_ID,OPPORTUNITY_NAME,OPPORTUNITY_LNE_NAME,MATNR,DESCRIPTION,SAP_CUSTOMER,
+                          CUST_NAME,SALES_ORGANIZATION,PRODUCT_CATEGORY,BUSINESS_UNIT,CURRENT_QG_STATUS,RELEASED_DATE,SAMPLES_CENTER,DESIGN_CENTER,MANUFACTURE_CENTER,
+                          PIECES_1Y,PIECES_2Y,PIECES_3Y,PIECES_4Y,PIECES_5Y,PRICE_1Y,PRICE_2Y,PRICE_3Y,PRICE_4Y,PRICE_CUR,RATE_VS_EUR,SOP,OWNER_SF,PARENT_NAME,SF_LINK,Priority";
+
+        return MainSql;
+
     }
-            private string SQL_TRA_PROJECT_STATUS()
+    private string SQL_TRA_PROJECT_STATUS()
     {
 
-        return $@"SELECT CURRENT_STATUS
-                  FROM TRA_PROJECTS_STATUS
-                  WHERE OPP_LINE_ID = @OppLineId AND MODULE_ID = @ModuleId AND STATUS_ID = @GateId";
+        return $@"SELECT T1.CURRENT_STATUS,T2.STATUS_DESCRIPTION
+                  FROM TRA_PROJECTS_STATUS T1
+                  JOIN dbo.MAS_STATUS T2 ON T2.STATUS_MODULE=T1.MODULE_ID AND T2.STATUS_ID=T1.STATUS_ID
+                  WHERE T1.OPP_LINE_ID = @OppLineId AND T1.MODULE_ID = @ModuleId AND T1.STATUS_ID = @GateId";
     }
     /// <summary>
     /// Brings from DB maximum detail for an especif Project PPROJECT->STATUS->GATES->DELIVERABLES->DELIVERABLES FILES-> DELIVERABLES COMMENTS    
@@ -945,8 +972,8 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
             if (queryPrStatus.RecordsAffected != 1)
                 return OperationResult<PROJECT_DETAIL>.Fail("Error: More than one project record from datatable");
 
-            string currentStatus = queryPrStatus.DTResults.Rows[0]["CURRENT_STATUS"]?.ToString().Trim();
-
+            string currentStatus = queryPrStatus.DTResults.Rows[0]["CURRENT_STATUS"]?.ToString()?.Trim() ?? string.Empty;
+            string CurrentStatusDescription= queryPrStatus.DTResults.Rows[0]["STATUS_DESCRIPTION"]?.ToString()?.Trim() ?? string.Empty;
             if (currentStatus == "WAIT_GPM")
                 return OperationResult<PROJECT_DETAIL>.Fail("Error: GPM still is not available therefore user still can not work with Feasibility status");
 
@@ -966,7 +993,8 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                     OPP_LINE_ID     = GetString(row, "OPPORTUNITY_LINE_ID"),
                     OPP_NAME        = GetString(row, "OPPORTUNITY_NAME"),
                     OPP_LINE_NAME   = GetString(row, "OPPORTUNITY_LNE_NAME"),
-                    CURRENT_GATE_ID = GetString(row, "CURRENT_QG_STATUS"),
+                    CURRENT_GATE_ID = Gate_Id,
+                    CURRENT_GATE_DESCRIPTION= CurrentStatusDescription 
                 };
                 _PDCC_LINK = GetString(row, "PDCC_LINK");
             }
