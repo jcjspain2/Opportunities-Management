@@ -257,6 +257,20 @@ public class USERS_COLLABORATIVE
     public string Responsible_Task_Comment { get; set; } = string.Empty;
 }
 
+public class DeliverableAllocationRow
+{
+    public string OpportunityName { get; set; } = string.Empty;
+    public string StatusId { get; set; } = string.Empty;
+    public string DeliverableName { get; set; } = string.Empty;
+    public string ResponsibleUserId { get; set; } = string.Empty;
+    public string AccountableUserId { get; set; } = string.Empty;
+    public string ResponsibleJobTitle { get; set; } = string.Empty;
+    public string AccountableJobTitle { get; set; } = string.Empty;
+    public AllocationState ResponsibleState { get; set; }
+    public AllocationState AccountableState { get; set; }
+    public decimal EffortRate { get; set; }
+}
+
 
 
 public enum Priority
@@ -275,6 +289,13 @@ public enum StatusState
     Rejected = 5
 }
 
+public enum AllocationState
+{
+    NotStarted = 1,
+    InProgress = 2,
+    PendingReview = 3,
+    Completed = 4    // role reached final state — row still returned because the other role is still active
+}
 public enum DeliverableRolesEstructure
 {
     Responsible = 1,

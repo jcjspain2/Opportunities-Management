@@ -21,15 +21,19 @@ public partial class Class_Projects_Quality_Gates
 {
 
     /// <summary>
-    /// Allow to get current situation regarding deliverables allocations not finished.
+    /// Returns one <see cref="DeliverableAllocationRow"/> per active deliverable in the given module.
+    /// A deliverable is active when at least one role (Responsible or Accountable) has not reached a final state.
+    /// Each row carries both role states as <see cref="AllocationState"/> — the UI applies LINQ grouping and
+    /// aggregation to produce any workload view it needs.
     /// </summary>
-    private async Task<OperationResult<bool>> GetDashboardCurrentAllocations(Module_ID CurrentModule)
+    public async Task<OperationResult<List<DeliverableAllocationRow>>> GetDashboardCurrentAllocations(
+        CancellationToken cancellationToken = default)
     {
         string Sql;
-        switch (CurrentModule)
+        switch (_MODULE_ID_ENUM)
         {
             case Module_ID.Q_GATES:
-                Sql = @" SELECT TP.OPPORTUNITY_NAME,TS.STATUS_IDT1.DELIVERABLE_NAME,RESPONSIBLE_USER_ID,
+                Sql = @" SELECT TP.OPPORTUNITY_NAME,TS.STATUS_ID,T1.DELIVERABLE_NAME,RESPONSIBLE_USER_ID,
                               ACCOUNTABLE_USER_ID,
                               T4.JOB_TITLE_DESCRIPTION JOB_TITLE_RESP,
                               T5.JOB_TITLE_DESCRIPTION JOB_TITLE_ACC,
@@ -51,7 +55,7 @@ public partial class Class_Projects_Quality_Gates
                 break;
             case Module_ID.Q_GATES_PR:
             default:
-                Sql = $@"
+                Sql = @"
                SELECT TP.OPPORTUNITY_NAME,TS.STATUS_ID,T1.DELIVERABLE_NAME,RESPONSIBLE_USER_ID,
                       ACCOUNTABLE_USER_ID,
                       T4.JOB_TITLE_DESCRIPTION JOB_TITLE_RESP,
@@ -64,25 +68,49 @@ public partial class Class_Projects_Quality_Gates
                       T3.IS_IN_PROGRESS ACC_IN_PROGRESS,
                       EFFORT_RATE RESP_EFFORT_RATE
                FROM dbo.TRA_PROJECTS_DELIVERABLES T1
-               JOIN dbo.TRA_PROJECTS TP ON TP.OPPORTUNITY_LINE_ID=T1.OPP_LINE_ID AND TP.IsLost_SF=0 AND TP.IsAbandoned=0 AND TP.Is_Q_GATES_PR=1 
+               JOIN dbo.TRA_PROJECTS TP ON TP.OPPORTUNITY_LINE_ID=T1.OPP_LINE_ID AND TP.IsLost_SF=0 AND TP.IsAbandoned=0 AND TP.Is_Q_GATES_PR=1
                JOIN dbo.TRA_PROJECTS_STATUS AS TS ON TS.OPP_LINE_ID=T1.OPP_LINE_ID AND TS.STATUS_ID=T1.STATUS_ID AND TS.MODULE_ID='Q_GATES'
-               JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID='Q_GATES' AND T2.KEY_PROCESS='DEL_RESP' AND T1.DELIVERABLE_STATUS_ID=T2.GATE_STATUS_ID 
-               JOIN dbo.MAS_GATE_STATUS T3 ON T3.MODULE_ID='Q_GATES' AND T3.KEY_PROCESS='DEL_ACC' AND T1.DELIVERABLE_STATUS_ID=T3.GATE_STATUS_ID 
+               JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID='Q_GATES' AND T2.KEY_PROCESS='DEL_RESP' AND T1.DELIVERABLE_STATUS_ID=T2.GATE_STATUS_ID
+               JOIN dbo.MAS_GATE_STATUS T3 ON T3.MODULE_ID='Q_GATES' AND T3.KEY_PROCESS='DEL_ACC' AND T1.DELIVERABLE_STATUS_ID=T3.GATE_STATUS_ID
                JOIN dbo.MAS_JOB_TITLES T4 ON T4.JOB_TITLE_ID =T1.RESPONSIBLE_JOB_ID
                JOIN dbo.MAS_JOB_TITLES T5 ON T5.JOB_TITLE_ID =T1.ACCOUNTABLE_JOB_ID
                WHERE (T2.IS_FINAL_STATE=0 OR T3.IS_FINAL_STATE=0)";
                 break;
         }
 
-        if (string.IsNullOrEmpty(Sql))
-            return OperationResult<bool>.Fail($"Module '{CurrentModule}' has no SQL defined yet.");
+        var queryResult = await _db.GetDatatableFromSelectAsync(Sql, null, cancellationToken: cancellationToken);
+        if (!queryResult.Success || queryResult.DTResults == null)
+            return OperationResult<List<DeliverableAllocationRow>>.Fail($"Error: {queryResult.Message}");
 
-        var queryResult = await _db.GetDatatableFromSelectAsync(Sql, null);
-        if (!queryResult.Success)
-            return OperationResult<bool>.Fail($"Error: {queryResult.Message}");
+        var result = new List<DeliverableAllocationRow>(queryResult.DTResults.Rows.Count);
 
-        return OperationResult<bool>.Ok(true);
+        foreach (DataRow row in queryResult.DTResults.Rows)
+        {
+            result.Add(new DeliverableAllocationRow
+            {
+                OpportunityName     = GetString(row, "OPPORTUNITY_NAME"),
+                StatusId            = GetString(row, "STATUS_ID"),
+                DeliverableName     = GetString(row, "DELIVERABLE_NAME"),
+                ResponsibleUserId   = GetString(row, "RESPONSIBLE_USER_ID"),
+                AccountableUserId   = GetString(row, "ACCOUNTABLE_USER_ID"),
+                ResponsibleJobTitle = GetString(row, "JOB_TITLE_RESP"),
+                AccountableJobTitle = GetString(row, "JOB_TITLE_ACC"),
+                ResponsibleState    = ResolveAllocationState(row, "RESP_INITIAL_STATE", "RESP_IN_PROGRESS", "RESP_PENDING_REVIEW"),
+                AccountableState    = ResolveAllocationState(row, "ACC_INITIAL_STATE", "ACC_IN_PROGRESS", "ACC_PENDING_STATE"),
+                EffortRate          = (decimal)GetDouble(row, "RESP_EFFORT_RATE"),
+            });
+        }
+
+        return OperationResult<List<DeliverableAllocationRow>>.Ok(result);
     }
+    private static AllocationState ResolveAllocationState(DataRow row, string notStartedCol, string inProgressCol, string pendingCol)
+    {
+        if (Convert.ToBoolean(row[inProgressCol]))  return AllocationState.InProgress;
+        if (Convert.ToBoolean(row[pendingCol]))     return AllocationState.PendingReview;
+        if (Convert.ToBoolean(row[notStartedCol]))  return AllocationState.NotStarted;
+        return AllocationState.Completed;
+    }
+
     /// <summary>
     /// Checks whether the requesting user's job title is authorized for a given key process.
     /// </summary>

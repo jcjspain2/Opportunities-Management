@@ -880,8 +880,8 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
             case Module_ID.Q_GATES:
                 if (isAbandoned)
                 {
-                    WhereClause = $@" WHERE [IsGeneratedInitial]=1 AND T1.IsLost_SF=1 AND [IsAbandoned]=1 AND Is_Q_GATES=1";
-                
+                    WhereClause = $@" WHERE [IsGeneratedInitial]=1 AND T1.IsLost_SF=0 AND [IsAbandoned]=1 AND Is_Q_GATES=1";
+                    break;
                 }
                 WhereClause = $@" WHERE[IsGeneratedInitial]=1 AND T1.IsLost_SF=0 AND [IsAbandoned]=0 AND Is_Q_GATES=1";
                 break;
@@ -889,6 +889,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                 if (isAbandoned)
                 {
                     WhereClause = $@" WHERE [IsGeneratedInitial_PR]=1 AND T1.IsLost_SF=0 AND [IsAbandoned]=1 AND Is_Q_GATES_PR=1";
+                    break;
                 }
                 WhereClause = $@" WHERE [IsGeneratedInitial_PR]=1 AND T1.IsLost_SF=0 AND [IsAbandoned]=0 AND Is_Q_GATES_PR=1";
                 break;

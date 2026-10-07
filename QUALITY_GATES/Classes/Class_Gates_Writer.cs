@@ -456,29 +456,35 @@ namespace QUALITY_GATES.Classes
                   SELECT COUNT(*) AS NOT_FINAL_STATE_DELIVERBLES
                   FROM dbo.TRA_PROJECTS_DELIVERABLES
                   JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID = 'Q_GATES' AND T2.KEY_PROCESS = 'DEL_ACC' AND IS_FINAL_STATE<> 1
+                                                 AND DELIVERABLE_STATUS_ID=GATE_STATUS_ID
                   where OPP_LINE_ID = @OppLineId AND STATUS_ID = @StatusId ";
 
 
-                SqlParameter[] ParamsStatus() => new[]
-      {
-                new SqlParameter("@StatusIdToUpdate",STATUS_ID_GATE ),
-                new SqlParameter("@OppLineId",        oppLineId),
-                new SqlParameter("@StatusId",         statusId),
-                new SqlParameter("@UserId",           USER_ID_WHO_REQUEST)
-            };
+                SqlParameter[] ParamsDel() => new[]
+                                          { new SqlParameter("@OppLineId",oppLineId),
+                                            new SqlParameter("@StatusId", statusId),
+                                          };
 
-                var resultDelNotFinalState = await _db.GetDatatableFromSelectAsync(sqlDelFinalState, ParamsStatus(), cancellationToken: cancellationToken);
+                var resultDelNotFinalState = await _db.GetDatatableFromSelectAsync(sqlDelFinalState, ParamsDel(), cancellationToken: cancellationToken);
 
                 if (!resultDelNotFinalState.Success || resultDelNotFinalState.DTResults == null)
                     return OperationResult<bool>.Fail($"Error: {result.Message}");
-                   
+
 
                 if (Convert.ToInt32(resultDelNotFinalState.DTResults.Rows[0]["NOT_FINAL_STATE_DELIVERBLES"]) == 0)
                 {
                     STATUS_ID_GATE = "COMPLETED";
                 }
-                var StatusResult = await _db.NonQueryDataToSQLServer(
-                       SQL_Update_Status(), ParamsStatus(), cancellationToken: cancellationToken);
+                else
+                {
+                    STATUS_ID_GATE = "INPROGRESS";
+                }
+                    SqlParameter[] ParamsStatus() => new[]
+                                             { new SqlParameter("@StatusIdToUpdate",STATUS_ID_GATE ),
+                                               new SqlParameter("@OppLineId",oppLineId),
+                                               new SqlParameter("@StatusId",statusId),
+                                              };
+                var StatusResult = await _db.NonQueryDataToSQLServer( SQL_Update_Status(), ParamsStatus(), cancellationToken: cancellationToken);
                 if (!StatusResult.Success)
                 {
                     return OperationResult<bool>.Fail($"Error updating Gate status: {StatusResult.Message}");

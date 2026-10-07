@@ -51,8 +51,8 @@ public partial class Class_Projects_Quality_Gates
         {
             return new Return_SQL_Action
             {
-                Success = false,
-                Message = "There are no states available for the project, all possible status are already generated",
+                Success = true,
+                Message = "Next gate is already open",
                 RecordsAffected = 0
             };
         }
