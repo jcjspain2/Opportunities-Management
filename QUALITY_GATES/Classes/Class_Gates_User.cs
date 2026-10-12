@@ -2,8 +2,10 @@
 
 using GrupoPremo.Intranet.Library.Models;
 using Microsoft.Data.SqlClient;
-using QUALITY_GATES.Data;
 using QUALITY_GATES.Models;
+using SqlDataLayer;
+using SqlDataLayer.Models;
+using static SqlDataLayer.SqlDbAccess;
 using System.Collections;
 using System.Collections.Generic;
 using System.Data;
@@ -13,7 +15,6 @@ using System.Reflection.Metadata;
 using System.Runtime.InteropServices;
 using System.Threading;
 using UtilidadesFichero;
-using static QUALITY_GATES.Data.SqlConnectionFactory;
 using static QUALITY_GATES.Tools.Static_Local_Functions;
 
 namespace QUALITY_GATES.Classes;
@@ -33,7 +34,8 @@ public partial class Class_Projects_Quality_Gates
         switch (_MODULE_ID_ENUM)
         {
             case Module_ID.Q_GATES:
-                Sql = @" SELECT TP.OPPORTUNITY_NAME,TS.STATUS_ID,T1.DELIVERABLE_NAME,RESPONSIBLE_USER_ID,
+                Sql = @" SELECT T1.OPP_LINE_ID,T1.STATUS_ID,T1.SGATE_ID,T1.DELIVERABLE_ID,
+                              TP.OPPORTUNITY_NAME,T1.DELIVERABLE_NAME,RESPONSIBLE_USER_ID,
                               ACCOUNTABLE_USER_ID,
                               T4.JOB_TITLE_DESCRIPTION JOB_TITLE_RESP,
                               T5.JOB_TITLE_DESCRIPTION JOB_TITLE_ACC,
@@ -56,17 +58,18 @@ public partial class Class_Projects_Quality_Gates
             case Module_ID.Q_GATES_PR:
             default:
                 Sql = @"
-               SELECT TP.OPPORTUNITY_NAME,TS.STATUS_ID,T1.DELIVERABLE_NAME,RESPONSIBLE_USER_ID,
+               SELECT T1.OPP_LINE_ID,T1.STATUS_ID,T1.SGATE_ID,T1.DELIVERABLE_ID,
+                      TP.OPPORTUNITY_NAME,T1.DELIVERABLE_NAME,RESPONSIBLE_USER_ID,
                       ACCOUNTABLE_USER_ID,
-                      T4.JOB_TITLE_DESCRIPTION JOB_TITLE_RESP,
-                      T5.JOB_TITLE_DESCRIPTION JOB_TITLE_ACC,
-                      T2.IS_INITIAL_STATE RESP_INITIAL_STATE,
-                      T2.IS_PENDING_REVIEW RESP_PENDING_REVIEW,
-                      T2.IS_IN_PROGRESS RESP_IN_PROGRESS,
-                      T3.IS_INITIAL_STATE ACC_INITIAL_STATE,
-                      T3.IS_PENDING_REVIEW ACC_PENDING_STATE,
-                      T3.IS_IN_PROGRESS ACC_IN_PROGRESS,
-                      EFFORT_RATE RESP_EFFORT_RATE
+                              T4.JOB_TITLE_DESCRIPTION JOB_TITLE_RESP,
+                              T5.JOB_TITLE_DESCRIPTION JOB_TITLE_ACC,
+                              T2.IS_INITIAL_STATE RESP_INITIAL_STATE,
+                              T2.IS_PENDING_REVIEW RESP_PENDING_REVIEW,
+                              T2.IS_IN_PROGRESS RESP_IN_PROGRESS,
+                              T3.IS_INITIAL_STATE ACC_INITIAL_STATE,
+                              T3.IS_PENDING_REVIEW ACC_PENDING_STATE,
+                              T3.IS_IN_PROGRESS ACC_IN_PROGRESS,
+                              EFFORT_RATE RESP_EFFORT_RATE
                FROM dbo.TRA_PROJECTS_DELIVERABLES T1
                JOIN dbo.TRA_PROJECTS TP ON TP.OPPORTUNITY_LINE_ID=T1.OPP_LINE_ID AND TP.IsLost_SF=0 AND TP.IsAbandoned=0 AND TP.Is_Q_GATES_PR=1
                JOIN dbo.TRA_PROJECTS_STATUS AS TS ON TS.OPP_LINE_ID=T1.OPP_LINE_ID AND TS.STATUS_ID=T1.STATUS_ID AND TS.MODULE_ID='Q_GATES'
@@ -78,7 +81,7 @@ public partial class Class_Projects_Quality_Gates
                 break;
         }
 
-        var queryResult = await _db.GetDatatableFromSelectAsync(Sql, null, cancellationToken: cancellationToken);
+        var queryResult = await _db.SelectAsync(Sql, null, cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
             return OperationResult<List<DeliverableAllocationRow>>.Fail($"Error: {queryResult.Message}");
 
@@ -88,11 +91,14 @@ public partial class Class_Projects_Quality_Gates
         {
             result.Add(new DeliverableAllocationRow
             {
-                OpportunityName     = GetString(row, "OPPORTUNITY_NAME"),
-                StatusId            = GetString(row, "STATUS_ID"),
-                DeliverableName     = GetString(row, "DELIVERABLE_NAME"),
-                ResponsibleUserId   = GetString(row, "RESPONSIBLE_USER_ID"),
-                AccountableUserId   = GetString(row, "ACCOUNTABLE_USER_ID"),
+                Opportunity_Line_id= GetString(row, "OPP_LINE_ID"),
+                StatusId = GetString(row, "STATUS_ID"),
+                GateId = GetString(row, "SGATE_ID"),
+                DeliverableId = GetString(row, "DELIVERABLE_ID"),
+                OpportunityName = GetString(row, "OPPORTUNITY_NAME"),
+                DeliverableName = GetString(row, "DELIVERABLE_NAME"),
+                ResponsibleUserId = GetString(row, "RESPONSIBLE_USER_ID"),
+                AccountableUserId = GetString(row, "ACCOUNTABLE_USER_ID"),
                 ResponsibleJobTitle = GetString(row, "JOB_TITLE_RESP"),
                 AccountableJobTitle = GetString(row, "JOB_TITLE_ACC"),
                 ResponsibleState    = ResolveAllocationState(row, "RESP_INITIAL_STATE", "RESP_IN_PROGRESS", "RESP_PENDING_REVIEW"),
@@ -131,23 +137,25 @@ public partial class Class_Projects_Quality_Gates
             return OperationResult<bool>.Fail(userDetails.ErrorMessage);
 
         // Step 2: retrieve authorized job titles for this key process
-        //TODO: Use MODULE_ID instead Q_GATES
-        const string sql_KEY_PROCESS_CHECK = """
+        string sql_KEY_PROCESS_CHECK = """
                   SELECT [JOB_TITLE]
                   FROM [dbo].[MAS_JOB_TITLES_RESTRICTIONS]
-                  WHERE MODULE_ID = 'Q_GATES' AND KEY_PROCESS = @KeyProcess
+                  WHERE MODULE_ID = @MODULE_ID AND KEY_PROCESS = @KeyProcess
                   """;
 
-        var parameters = new[] { new SqlParameter("@KeyProcess", KeyProcess) };
+        var parameters = new[]
+        {
+            new SqlParameter("@MODULE_ID", _MODULE_ID),
+            new SqlParameter("@KeyProcess", KeyProcess)
+        };
 
-        var queryResult = await _db.GetDatatableFromSelectAsync(sql_KEY_PROCESS_CHECK, parameters, cancellationToken: cancellationToken);
+        var queryResult = await _db.SelectAsync(sql_KEY_PROCESS_CHECK, parameters, cancellationToken);
 
         if (!queryResult.Success || queryResult.DTResults == null)
             return OperationResult<bool>.Fail($"Database error retrieving restrictions for key process '{KeyProcess}': {queryResult.Message}");
 
-
         if (queryResult.DTResults.Rows.Count == 0)
-            return OperationResult<bool>.Fail($"User '{UserRequester}' do not have proper job title to generate next gate.");
+            return OperationResult<bool>.Fail($"No restrictions defined for key process '{KeyProcess}' in module '{_MODULE_ID}'.");
 
 
         // Step 3: check if the user's job title is in the authorized list
@@ -188,7 +196,7 @@ public partial class Class_Projects_Quality_Gates
 
         var parameters = new[] { new SqlParameter("@User_ID", UserRequester) };
 
-        var queryResult = await _db.GetDatatableFromSelectAsync(sqlUser_Job_title, parameters, cancellationToken: cancellationToken);
+        var queryResult = await _db.SelectAsync(sqlUser_Job_title, parameters, cancellationToken);
 
         if (!queryResult.Success || queryResult.DTResults == null)
             return OperationResult<USERS_DETAILS>.Fail($"Database error retrieving user '{UserRequester}': {queryResult.Message}");
@@ -246,7 +254,7 @@ public partial class Class_Projects_Quality_Gates
             new SqlParameter("@DELIVERABLE_ID", DELIVERABLE_ID)
         };
 
-        var queryResult = await _db.GetDatatableFromSelectAsync(sql, parameters, cancellationToken: cancellationToken);
+        var queryResult = await _db.SelectAsync(sql, parameters, cancellationToken);
 
         if (!queryResult.Success || queryResult.DTResults == null)
             return OperationResult<List<USERS_COLLABORATIVE>>.Fail($"Error: {queryResult.Message}");
@@ -282,7 +290,7 @@ const string SQL_Users_Id_By_JobTitle = """
              LEFT JOIN dbo.MAS_JOB_TITLES T4 ON T3.JOB_TITLE_ID=T4.JOB_TITLE_ID
              WHERE T1.Enabled=1 and T1.EmailAddress <> ''
           """;
-var queryResult = await _db.GetDatatableFromSelectAsync(SQL_Users_Id_By_JobTitle,null, cancellationToken: cancellationToken);
+var queryResult = await _db.SelectAsync(SQL_Users_Id_By_JobTitle,null, cancellationToken);
 if (!queryResult.Success || queryResult.DTResults == null)
     return OperationResult<List<USERS_DETAILS>>.Fail($"Error: {queryResult.Message}");
 
@@ -338,7 +346,7 @@ const string SQL_Users_Id_By_JobTitle = """
           """;
 var parameters = new[] { new SqlParameter("@JOB_TITLE_ID", JobTitle) };
 
-var queryResult = await _db.GetDatatableFromSelectAsync(SQL_Users_Id_By_JobTitle, parameters, cancellationToken: cancellationToken);
+var queryResult = await _db.SelectAsync(SQL_Users_Id_By_JobTitle, parameters, cancellationToken);
 if (!queryResult.Success || queryResult.DTResults == null)
     return OperationResult<List<USERS_DETAILS>>.Fail($"Error: {queryResult.Message}");
 

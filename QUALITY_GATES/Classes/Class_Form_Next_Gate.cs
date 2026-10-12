@@ -1,13 +1,14 @@
 ﻿using GrupoPremo.Intranet.Library.IService;
 using Microsoft.Extensions.DependencyInjection;
-using QUALITY_GATES.Data;
 using QUALITY_GATES.Models;
+using SqlDataLayer;
+using SqlDataLayer.Models;
+using static SqlDataLayer.SqlDbAccess;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using static QUALITY_GATES.Data.SqlConnectionFactory;
 
 namespace QUALITY_GATES.Classes;
 public partial class Class_Projects_Quality_Gates

@@ -1,13 +1,14 @@
 ﻿using GrupoPremo.Intranet.Library.Models;
 using Microsoft.Data.SqlClient;
-using QUALITY_GATES.Data;
 using QUALITY_GATES.Models;
+using SqlDataLayer;
+using SqlDataLayer.Models;
+using static SqlDataLayer.SqlDbAccess;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlTypes;
 using System.Runtime.InteropServices;
 using System.Threading;
-using static QUALITY_GATES.Data.SqlConnectionFactory;
 using static QUALITY_GATES.Tools.Static_Local_Functions;
 
 
@@ -41,7 +42,7 @@ namespace QUALITY_GATES.Classes
                     return OperationResult<bool>.Fail($"User '{user.UserId}' has empty required fields.");
             }
 
-            var existingResult = await _db.GetDatatableFromSelectAsync(
+            var existingResult = await _db.SelectAsync(
                 SQL_Get_Existing_Collaborators(),
                 new[]
                 {
@@ -50,7 +51,7 @@ namespace QUALITY_GATES.Classes
                     new SqlParameter("@SgateId",   sgateId),
                     new SqlParameter("@DelId",     delId)
                 },
-                cancellationToken: cancellationToken);
+                cancellationToken);
 
             if (!existingResult.Success || existingResult.DTResults == null)
                 return OperationResult<bool>.Fail($"Error checking existing collaborators: {existingResult.Message}");
@@ -68,10 +69,10 @@ namespace QUALITY_GATES.Classes
             var userMails = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var user in ListUsersToCollaborate)
             {
-                var mailResult = await _db.GetDatatableFromSelectAsync(
+                var mailResult = await _db.SelectAsync(
                     SQL_Get_User_Mail_By_SamAccount(),
                     new[] { new SqlParameter("@UserId", user.UserId) },
-                    cancellationToken: cancellationToken);
+                    cancellationToken);
 
                 if (!mailResult.Success || mailResult.DTResults == null || mailResult.DTResults.Rows.Count == 0)
                     return OperationResult<bool>.Fail($"User '{user.UserId}' not found in AD directory.");
@@ -79,7 +80,8 @@ namespace QUALITY_GATES.Classes
                 userMails[user.UserId] = GetString(mailResult.DTResults.Rows[0], "EmailAddress");
             }
 
-            await using var conn = await _db.CreateOpenConnectionAsync(cancellationToken: cancellationToken);
+            await using var conn = new SqlConnection(_db.ConnectionString);
+            await conn.OpenAsync(cancellationToken);
             await using var tx = conn.BeginTransaction();
             try
             {
@@ -97,8 +99,8 @@ namespace QUALITY_GATES.Classes
                         new SqlParameter("@GeneratedBy", User_Who_Request)
                     };
 
-                    var insertResult = await _db.NonQueryDataToSQLServer(
-                        SQL_Insert_Collaborator(), parameters, transaction: tx, cancellationToken: cancellationToken);
+                    var insertResult = await _db.NonQueryAsync(
+                        SQL_Insert_Collaborator(), parameters, tx, cancellationToken);
 
                     if (!insertResult.Success)
                     {
@@ -188,7 +190,7 @@ namespace QUALITY_GATES.Classes
             new SqlParameter("@CommentBy",   commentBy),
         };
 
-            var result = await _db.NonQueryDataToSQLServer(SQL_Insert_Deliverable_Comment(), parameters);
+            var result = await _db.NonQueryAsync(SQL_Insert_Deliverable_Comment(), parameters);
 
             return result.Success
                 ? OperationResult<Guid>.Ok(newCommentId)
@@ -222,7 +224,7 @@ namespace QUALITY_GATES.Classes
             new SqlParameter("@CommentBy",   commentBy),
         };
 
-            var result = await _db.NonQueryDataToSQLServer(SQL_Insert_Deliverable_Comment_Accountant(), parameters);
+            var result = await _db.NonQueryAsync(SQL_Insert_Deliverable_Comment_Accountant(), parameters);
 
             return result.Success
                 ? OperationResult<Guid>.Ok(newCommentId)
@@ -252,7 +254,7 @@ namespace QUALITY_GATES.Classes
                 new SqlParameter("@DelId",     delId)
             };
 
-            var result = await _db.NonQueryDataToSQLServer(SQL_Update_Deliverable_UserText(), parameters, cancellationToken: cancellationToken);
+            var result = await _db.NonQueryAsync(SQL_Update_Deliverable_UserText(), parameters, ct: cancellationToken);
 
             if (!result.Success)
                 return OperationResult<bool>.Fail($"Error updating deliverable user text: {result.Message}");
@@ -292,7 +294,7 @@ namespace QUALITY_GATES.Classes
                 new SqlParameter("@OppLineId", oppLineId)
             };
 
-            var result = await _db.NonQueryDataToSQLServer(SQL_Update_Project_Priority(), parameters, cancellationToken: cancellationToken);
+            var result = await _db.NonQueryAsync(SQL_Update_Project_Priority(), parameters, ct: cancellationToken);
 
             if (!result.Success)
                 return OperationResult<bool>.Fail($"Error updating project priority: {result.Message}");
@@ -384,12 +386,12 @@ namespace QUALITY_GATES.Classes
                         NEXT_GATE_TRIGGERS=1";
             if (isAccountableApproved)
             {
-                var resultNextGate = await _db.GetDatatableFromSelectAsync(sqlDeliverableNextgate,
+                var resultNextGate = await _db.SelectAsync(sqlDeliverableNextgate,
                    new[] { new SqlParameter("@OppLineId",        oppLineId),
                        new SqlParameter("@StatusId",         statusId),
                        new SqlParameter("@SgateId",          sgateId),
                        new SqlParameter("@DelId",            delId) },
-                   cancellationToken: cancellationToken);
+                   cancellationToken);
 
                 if (!resultNextGate.Success || resultNextGate.DTResults == null)
                     return OperationResult<bool>.Fail($"Error checking if is deliverable next gate:  '{oppLineId}/{statusId}/{sgateId}/{delId} + {resultNextGate.Message}'");
@@ -413,11 +415,12 @@ namespace QUALITY_GATES.Classes
                 new SqlParameter("@UserId",           USER_ID_WHO_REQUEST)
             };
 
-            await using var conn = await _db.CreateOpenConnectionAsync(cancellationToken: cancellationToken);
+            await using var conn = new SqlConnection(_db.ConnectionString);
+            await conn.OpenAsync(cancellationToken);
             await using var tx = conn.BeginTransaction();
             try
             {
-                var result = await _db.NonQueryDataToSQLServer(SQL_Update_Deliverable_Responsible_Status(), ParamsResp(), transaction: tx, cancellationToken: cancellationToken);
+                var result = await _db.NonQueryAsync(SQL_Update_Deliverable_Responsible_Status(), ParamsResp(), tx, cancellationToken);
 
                 if (!result.Success)
                 {
@@ -440,8 +443,8 @@ namespace QUALITY_GATES.Classes
                 new SqlParameter("@UserId",           USER_ID_WHO_REQUEST)
             };
 
-                var accResult = await _db.NonQueryDataToSQLServer(
-                        SQL_Update_New_Deliverable_Accountable_Status(), ParamsAcc(), transaction: tx, cancellationToken: cancellationToken);
+                var accResult = await _db.NonQueryAsync(
+                        SQL_Update_New_Deliverable_Accountable_Status(), ParamsAcc(), tx, cancellationToken);
 
                     if (!accResult.Success)
                     {
@@ -465,7 +468,7 @@ namespace QUALITY_GATES.Classes
                                             new SqlParameter("@StatusId", statusId),
                                           };
 
-                var resultDelNotFinalState = await _db.GetDatatableFromSelectAsync(sqlDelFinalState, ParamsDel(), cancellationToken: cancellationToken);
+                var resultDelNotFinalState = await _db.SelectAsync(sqlDelFinalState, ParamsDel(), cancellationToken);
 
                 if (!resultDelNotFinalState.Success || resultDelNotFinalState.DTResults == null)
                     return OperationResult<bool>.Fail($"Error: {result.Message}");
@@ -484,7 +487,7 @@ namespace QUALITY_GATES.Classes
                                                new SqlParameter("@OppLineId",oppLineId),
                                                new SqlParameter("@StatusId",statusId),
                                               };
-                var StatusResult = await _db.NonQueryDataToSQLServer( SQL_Update_Status(), ParamsStatus(), cancellationToken: cancellationToken);
+                var StatusResult = await _db.NonQueryAsync( SQL_Update_Status(), ParamsStatus(), ct: cancellationToken);
                 if (!StatusResult.Success)
                 {
                     return OperationResult<bool>.Fail($"Error updating Gate status: {StatusResult.Message}");
@@ -504,11 +507,11 @@ namespace QUALITY_GATES.Classes
             string keyProcess,
             CancellationToken cancellationToken = default)
         {
-            var result = await _db.GetDatatableFromSelectAsync(
+            var result = await _db.SelectAsync(
                 SQL_Validate_Deliverable_Status(),
                 new[] { new SqlParameter("@StatusIdToUpdate", STATUS_ID_TO_UPDATE),
                        new SqlParameter("@KeyProcess", keyProcess) },
-                cancellationToken: cancellationToken);
+                cancellationToken);
 
             if (!result.Success || result.DTResults == null)
                 return (false, $"Error validating status: {"Error trying to update " + STATUS_ID_TO_UPDATE + ": " + result.Message}");

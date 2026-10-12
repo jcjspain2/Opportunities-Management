@@ -3,8 +3,10 @@
 using GrupoPremo.Intranet.Library.Models;
 using Microsoft.Data.SqlClient;
 using Microsoft.IdentityModel.Tokens;
-using QUALITY_GATES.Data;
 using QUALITY_GATES.Models;
+using SqlDataLayer;
+using SqlDataLayer.Models;
+using static SqlDataLayer.SqlDbAccess;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
@@ -13,7 +15,6 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using UtilidadesFichero;
-using static QUALITY_GATES.Data.SqlConnectionFactory;
 using static QUALITY_GATES.Tools.Static_Local_Functions;
 
 
@@ -35,7 +36,7 @@ public partial class Class_Projects_Quality_Gates // Directr Query on BMS Databa
         DELIVERABLE_FILE_FROM_DMS DMSFiles = new DELIVERABLE_FILE_FROM_DMS();
         List<DELIVERABLE_FILE_FROM_DMS> CurList = new List<DELIVERABLE_FILE_FROM_DMS>();
         var paramsFile = new[] { new SqlParameter("@oppLineId", Opp_Line_ID) };
-        var queryResult = await _db.GetDatatableFromSelectAsync(SQL_FILES_PER_PROJECT_DMS(), paramsFile,DatabaseTarget.DMS, cancellationToken: cancellationToken);
+        var queryResult = await _dbDms.SelectAsync(SQL_FILES_PER_PROJECT_DMS(), paramsFile, cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
             return OperationResult<List<DELIVERABLE_FILE_FROM_DMS>>.Fail($"Error: {queryResult.Message}");
         
@@ -67,7 +68,7 @@ public partial class Class_Projects_Quality_Gates // Directr Query on BMS Databa
                 };
                 CurList.Add(DMSFiles);
             }
-            return OperationResult<List<DELIVERABLE_FILE_FROM_DMS>>.Ok(_db.DeepCopyList(CurList));
+            return OperationResult<List<DELIVERABLE_FILE_FROM_DMS>>.Ok(DeepCopyList(CurList));
 
         }
           
@@ -160,7 +161,7 @@ public partial class Class_Projects_Quality_Gates // Directr Query on BMS Databa
                                  new SqlParameter("@SGateId", GateId),
                                  new SqlParameter("@StatusId", StatusId),
                                  new SqlParameter("@DelivID", DelivId)};
-        var queryResult = await _db.GetDatatableFromSelectAsync(SQL_FILES_PER_DELIVERABLE_DMS(), paramsFile, DatabaseTarget.DMS, cancellationToken: cancellationToken);
+        var queryResult = await _dbDms.SelectAsync(SQL_FILES_PER_DELIVERABLE_DMS(), paramsFile, cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
             return OperationResult<List<DELIVERABLE_FILE>>.Fail($"Error: {queryResult.Message}");
 
@@ -192,7 +193,7 @@ public partial class Class_Projects_Quality_Gates // Directr Query on BMS Databa
                 };
                 CurList.Add(DMSFiles);
             }
-            return OperationResult<List<DELIVERABLE_FILE>>.Ok(_db.DeepCopyList(CurList));
+            return OperationResult<List<DELIVERABLE_FILE>>.Ok(DeepCopyList(CurList));
 
         }
 

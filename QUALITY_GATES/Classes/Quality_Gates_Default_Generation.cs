@@ -1,8 +1,10 @@
 
 
 using Microsoft.Data.SqlClient;
-using QUALITY_GATES.Data;
 using QUALITY_GATES.Models;
+using SqlDataLayer;
+using SqlDataLayer.Models;
+using static SqlDataLayer.SqlDbAccess;
 using System.Data;
 using System.Data.Common;
 using static QUALITY_GATES.Tools.Static_Local_Functions;
@@ -10,14 +12,14 @@ using static QUALITY_GATES.Tools.Static_Local_Functions;
 namespace QUALITY_GATES.Classes;
 public partial class Class_Projects_Quality_Gates
 {
-    public async Task<Return_SQL_Action> Generate_Next_Default_Gate(string OPP_LINE_ID, string USER_ID_WHO_REQUEST = "System",CancellationToken cancellationToken = default)
+    public async Task<SqlActionResult> Generate_Next_Default_Gate(string OPP_LINE_ID, string USER_ID_WHO_REQUEST = "System",CancellationToken cancellationToken = default)
     {
         // Check if requester user has right to do it
         if (USER_ID_WHO_REQUEST != "System") // System always allowed to generate next gate, no matter the job title
         {
             var result = await Get_KeyProcess_Job_title_Restriction("@GATE_GEN", USER_ID_WHO_REQUEST, cancellationToken);
             if (!result.Success)
-                return new Return_SQL_Action { Success = false, Message = result.ErrorMessage };
+                return new SqlActionResult { Success = false, Message = result.ErrorMessage };
         }
         // Determine which is the next gate to generate: first one not yet created for this project
         const string sqlNextGate = """
@@ -32,7 +34,7 @@ public partial class Class_Projects_Quality_Gates
                       new SqlParameter("@ModuleId", _MODULE_ID),
                       new SqlParameter("@OppLineId", OPP_LINE_ID),
                    };
-        var queryResult = await _db.GetDatatableFromSelectAsync(sqlNextGate, parametersNextGate, cancellationToken: cancellationToken);
+        var queryResult = await _db.SelectAsync(sqlNextGate, parametersNextGate, cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
             return queryResult;
 
@@ -49,7 +51,7 @@ public partial class Class_Projects_Quality_Gates
 
         if (nextGateRow == null)
         {
-            return new Return_SQL_Action
+            return new SqlActionResult
             {
                 Success = true,
                 Message = "Next gate is already open",
@@ -98,18 +100,19 @@ public partial class Class_Projects_Quality_Gates
             """;
 
         var parametersActGate = new[] { new SqlParameter("@GateID", GateID) };
-        queryResult = await _db.GetDatatableFromSelectAsync(sqlActions, parametersActGate, cancellationToken: cancellationToken);
+        queryResult = await _db.SelectAsync(sqlActions, parametersActGate, cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
             return queryResult;
         DataTable dtActions = queryResult.DTResults;
 
         var parametersDelGate = new[] { new SqlParameter("@GateID", GateID) };
-        queryResult = await _db.GetDatatableFromSelectAsync(sqlDeliverables, parametersDelGate, cancellationToken: cancellationToken);
+        queryResult = await _db.SelectAsync(sqlDeliverables, parametersDelGate, cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
             return queryResult;
         DataTable dtDeliverables = queryResult.DTResults;
 
-        await using var conn = await _db.CreateOpenConnectionAsync();
+        await using var conn = new SqlConnection(_db.ConnectionString);
+        await conn.OpenAsync();
         await using var tx = conn.BeginTransaction();
         try
         {
@@ -130,7 +133,7 @@ public partial class Class_Projects_Quality_Gates
                 new SqlParameter("@CurrentStatus", _Default_Status),
                 new SqlParameter("@User", USER_ID_WHO_REQUEST)
             };
-            queryResult = await _db.NonQueryDataToSQLServer(GetInsertDefaulGateStatus(), parametersStatus, transaction: tx);
+            queryResult = await _db.NonQueryAsync(GetInsertDefaulGateStatus(), parametersStatus, tx);
             if (!queryResult.Success)
             {
                 tx.Rollback();
@@ -149,7 +152,7 @@ public partial class Class_Projects_Quality_Gates
                     new SqlParameter("@User", USER_ID_WHO_REQUEST ),
                     new SqlParameter("@PlanStart", DateTime.Now)
                 };
-                queryResult = await _db.NonQueryDataToSQLServer(GetInsertDefaulGateActions(GateID), parametersAct, transaction: tx);
+                queryResult = await _db.NonQueryAsync(GetInsertDefaulGateActions(GateID), parametersAct, tx);
                 if (!queryResult.Success)
                 {
                     tx.Rollback();
@@ -183,7 +186,7 @@ public partial class Class_Projects_Quality_Gates
  
                      
                 };
-                queryResult = await _db.NonQueryDataToSQLServer(GetInsertDefaultGateDeliverables(GateID), parametersDel, transaction: tx);
+                queryResult = await _db.NonQueryAsync(GetInsertDefaultGateDeliverables(GateID), parametersDel, tx);
                 if (!queryResult.Success)
                 {
                     tx.Rollback();
@@ -197,7 +200,7 @@ public partial class Class_Projects_Quality_Gates
                 new SqlParameter("@Project_Id", OPP_LINE_ID),
                 new SqlParameter("@Current_Status", GateID)
             };
-            queryResult = await _db.NonQueryDataToSQLServer(GetUpdateProjectCurrentQGStatus(), parametersUpdtProject, transaction: tx);
+            queryResult = await _db.NonQueryAsync(GetUpdateProjectCurrentQGStatus(), parametersUpdtProject, tx);
             if (!queryResult.Success)
             {
                 tx.Rollback();
@@ -209,7 +212,7 @@ public partial class Class_Projects_Quality_Gates
         catch (Exception ex)
         {
             tx.Rollback();
-            queryResult = new Return_SQL_Action
+            queryResult = new SqlActionResult
             {
                 Success = false,
                 Message = $"Error generating next default gate: {ex.Message}",
@@ -220,7 +223,7 @@ public partial class Class_Projects_Quality_Gates
 
         return queryResult;
     }
-    public async Task<Return_SQL_Action> Generate_Default_Gate_FromInitial(string GateID,
+    public async Task<SqlActionResult> Generate_Default_Gate_FromInitial(string GateID,
                                                                           CancellationToken cancellationToken = default)
     {
         const string sqlProjects = """ 
@@ -294,7 +297,7 @@ public partial class Class_Projects_Quality_Gates
                 _SqlProject = string.Empty;
                 break;
         }
-        var queryResult = await _db.GetDatatableFromSelectAsync(_SqlProject, null, cancellationToken: cancellationToken);
+        var queryResult = await _db.SelectAsync(_SqlProject, null, cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
         { return queryResult; } // Error generating SQL query 
         if (queryResult.Success & queryResult.RecordsAffected == 0)
@@ -305,20 +308,21 @@ public partial class Class_Projects_Quality_Gates
         // Second recover default actions
         var parametersActGate = new[]
                    {new SqlParameter("@GateID", GateID) };
-        queryResult = await _db.GetDatatableFromSelectAsync(sqlActions, parametersActGate, cancellationToken: cancellationToken);
+        queryResult = await _db.SelectAsync(sqlActions, parametersActGate, cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
         { return queryResult; }
         DataTable dtActions = queryResult.DTResults;
         var parametersDelGate = new[]
                   {new SqlParameter("@GateID", GateID) };
-        queryResult = await _db.GetDatatableFromSelectAsync(sqlDeliverables, parametersDelGate, cancellationToken: cancellationToken);
+        queryResult = await _db.SelectAsync(sqlDeliverables, parametersDelGate, cancellationToken);
         // Third th recover default deliverables
         if (!queryResult.Success || queryResult.DTResults == null)
         { return queryResult; }
         DataTable dtDeliverables = queryResult.DTResults;
 
         // Open transaction
-        await using var conn = await _db.CreateOpenConnectionAsync();
+        await using var conn = new SqlConnection(_db.ConnectionString);
+        await conn.OpenAsync();
         await using var tx = conn.BeginTransaction();
         try
         {
@@ -342,7 +346,7 @@ public partial class Class_Projects_Quality_Gates
                       new SqlParameter("@CurrentStatus","NOTSTARTED"),
                       new SqlParameter("@User", "System")
                     };
-                queryResult = await _db.NonQueryDataToSQLServer(GetInsertDefaulGateStatus(), parametersStatus, transaction: tx);
+                queryResult = await _db.NonQueryAsync(GetInsertDefaulGateStatus(), parametersStatus, tx);
                 if (!queryResult.Success)
                 {
                     tx.Rollback();
@@ -361,7 +365,7 @@ public partial class Class_Projects_Quality_Gates
                       new SqlParameter("@User", "System"),
                       new SqlParameter("@PlanStart", DateTime.Now)
                     };
-                    queryResult = await _db.NonQueryDataToSQLServer(GetInsertDefaulGateActions(GateID), parametersAct, transaction: tx);
+                    queryResult = await _db.NonQueryAsync(GetInsertDefaulGateActions(GateID), parametersAct, tx);
                     if (!queryResult.Success)
                     {
                         tx.Rollback();
@@ -393,7 +397,7 @@ public partial class Class_Projects_Quality_Gates
                       new SqlParameter("@FolderToSave",  _FolderToSave ),
                       new SqlParameter("@Generates_Next_Gate",GetBoolean(rowD, "GENERATES_NEXT_GATE"))
                     };
-                    queryResult = await _db.NonQueryDataToSQLServer(GetInsertDefaultGateDeliverables(GateID), parametersDel, transaction: tx);
+                    queryResult = await _db.NonQueryAsync(GetInsertDefaultGateDeliverables(GateID), parametersDel, tx);
                     if (!queryResult.Success)
                     {
                         tx.Rollback();
@@ -406,7 +410,7 @@ public partial class Class_Projects_Quality_Gates
                  { new SqlParameter("@Project_Id", rowP["OPPORTUNITY_LINE_ID"].ToString()),
                    new SqlParameter("@Current_Status", GateID) 
                  };
-                queryResult = await _db.NonQueryDataToSQLServer(GetUpdateProjectAsFeasiilityGenerated(_MODULE_ID_ENUM), parametersUpdtProject, transaction: tx);
+                queryResult = await _db.NonQueryAsync(GetUpdateProjectAsFeasiilityGenerated(_MODULE_ID_ENUM), parametersUpdtProject, tx);
                 if (!queryResult.Success)
                 {
                     tx.Rollback();
@@ -439,7 +443,7 @@ public partial class Class_Projects_Quality_Gates
                     new SqlParameter("@OppLineId", GetString(rowP, "OPPORTUNITY_LINE_ID")),
                     new SqlParameter("@StatusId",  GateID)
                 };
-                queryResult = await _db.NonQueryDataToSQLServer(sqlUpdateKeyAccM, paramsUpdate, cancellationToken: cancellationToken);
+                queryResult = await _db.NonQueryAsync(sqlUpdateKeyAccM, paramsUpdate, ct: cancellationToken);
                 if (!queryResult.Success)
                     return queryResult;
             }
@@ -447,7 +451,7 @@ public partial class Class_Projects_Quality_Gates
         catch (Exception ex)
         {
             tx.Rollback();
-            queryResult = new Return_SQL_Action();
+            queryResult = new SqlActionResult();
             queryResult.Success = false;
             queryResult.Message = $"Error generating default gates and deliverables: {ex.Message}";
             queryResult.RecordsAffected = 0;

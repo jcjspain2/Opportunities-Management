@@ -3,8 +3,10 @@
 using GrupoPremo.Intranet.Library.Models;
 using Microsoft.Data.SqlClient;
 using Microsoft.IdentityModel.Tokens;
-using QUALITY_GATES.Data;
 using QUALITY_GATES.Models;
+using SqlDataLayer;
+using SqlDataLayer.Models;
+using static SqlDataLayer.SqlDbAccess;
 using System.Collections;
 using System.Collections.Generic;
 using System.Data;
@@ -13,7 +15,6 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 using  UtilidadesFichero;
-using static QUALITY_GATES.Data.SqlConnectionFactory;
 using static QUALITY_GATES.Tools.Static_Local_Functions;
 using  QUALITY_GATES.Classes;
 namespace QUALITY_GATES.Classes;
@@ -55,7 +56,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
             new SqlParameter("@Status_To_Check", STATUS_TO_CHECK)
         };
 
-        var queryResult = await _db.GetDatatableFromSelectAsync(sqlStatus, parameters, cancellationToken: cancellationToken);
+        var queryResult = await _db.SelectAsync(sqlStatus, parameters, cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
             return OperationResult<StatusState>.Fail($"Error: {queryResult.Message}");
 
@@ -285,7 +286,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                     new SqlParameter("@DelivID",    DELIVERABLE_ID)
                 };
         // Responsible comments (KEY_PROCESS='DELIV')
-        var delivCommentsResult = await _db.GetDatatableFromSelectAsync(SQL_Projects_Deliverable_Comments_Per_Deliverable(), paramsCommentsDeliverable, cancellationToken: cancellationToken);
+        var delivCommentsResult = await _db.SelectAsync(SQL_Projects_Deliverable_Comments_Per_Deliverable(), paramsCommentsDeliverable, cancellationToken);
         var delivComments = new List<DELIVERABLES_COMMENTS>();
         if (delivCommentsResult.Success && delivCommentsResult.DTResults != null)
         {
@@ -304,7 +305,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
         }
 
         // Accountant comments (KEY_PROCESS='ACC')
-        var accCommentsResult = await _db.GetDatatableFromSelectAsync(SQL_Projects_Deliverable_Comments_Accountant_Per_Deliverable(), paramsCommentsAcc, cancellationToken: cancellationToken);
+        var accCommentsResult = await _db.SelectAsync(SQL_Projects_Deliverable_Comments_Accountant_Per_Deliverable(), paramsCommentsAcc, cancellationToken);
         var accComments = new List<DELIVERABLES_COMMENTS>();
         if (accCommentsResult.Success && accCommentsResult.DTResults != null)
         {
@@ -327,7 +328,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
         var delivFiles = filesResult.Success ? filesResult.Data : new List<DELIVERABLE_FILE>();
 
         // Recovery of deliverable
-        var queryResult = await _db.GetDatatableFromSelectAsync(SQL_Get_Deliverable(), paramsDeliverable , cancellationToken: cancellationToken);
+        var queryResult = await _db.SelectAsync(SQL_Get_Deliverable(), paramsDeliverable , cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
             return OperationResult<GATES_DELIVERABLES>.Fail($"Error: {queryResult.Message}");
         try
@@ -403,7 +404,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
             default:
                 return OperationResult<List<TASKS_PENDING_TO_ALLOCATE>>.Fail($"Error: Invalid role specified.");
         }
-        var queryResult = await _db.GetDatatableFromSelectAsync(SqlString, paramsAcc, cancellationToken: cancellationToken);
+        var queryResult = await _db.SelectAsync(SqlString, paramsAcc, cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
             return OperationResult<List<TASKS_PENDING_TO_ALLOCATE>>.Fail($"Error: {queryResult.Message}");
         try
@@ -464,7 +465,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                 });
             }
             
-            return OperationResult<List<TASKS_PENDING_TO_ALLOCATE>>.Ok(_db.DeepCopyList(resultList));
+            return OperationResult<List<TASKS_PENDING_TO_ALLOCATE>>.Ok(DeepCopyList(resultList));
         }
 
         catch (Exception ex)
@@ -503,7 +504,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                 return OperationResult<List<MY_TASKS>>.Fail($"Error: Invalid role specified.");
         }
     
-         var queryResult = await _db.GetDatatableFromSelectAsync(SqlString, paramsAcc, cancellationToken: cancellationToken);
+         var queryResult = await _db.SelectAsync(SqlString, paramsAcc, cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
             return OperationResult<List<MY_TASKS>>.Fail($"Error: {queryResult.Message}");
 
@@ -553,7 +554,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                 });
             }
         
-            return OperationResult<List<MY_TASKS>>.Ok(_db.DeepCopyList(resultList));
+            return OperationResult<List<MY_TASKS>>.Ok(DeepCopyList(resultList));
         }
         catch (Exception ex)
         {
@@ -572,7 +573,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                                  new SqlParameter("@GateId", GateId),
                                  new SqlParameter("@StatusId", StatusId),
                                  new SqlParameter("@DelivID", DelivId)};
-        var queryResult = await _db.GetDatatableFromSelectAsync(SQL_Projects_Deliverable_Comments_Per_Deliverable(), paramsFile, cancellationToken: cancellationToken);
+        var queryResult = await _db.SelectAsync(SQL_Projects_Deliverable_Comments_Per_Deliverable(), paramsFile, cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
             return OperationResult<List<DELIVERABLES_COMMENTS>>.Fail($"Error: {queryResult.Message}");
 
@@ -593,7 +594,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                 };
                 CurList.Add(DevComments);
             }
-            return OperationResult<List<DELIVERABLES_COMMENTS>>.Ok(_db.DeepCopyList(CurList));
+            return OperationResult<List<DELIVERABLES_COMMENTS>>.Ok(DeepCopyList(CurList));
 
         }
 
@@ -628,7 +629,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
         const string sql = @"UPDATE dbo.TRA_PROJECTS SET IsAbandoned = 1 WHERE OPPORTUNITY_LINE_ID = @OppLineId";
         var parameters = new[] { new SqlParameter("@OppLineId", Opp_LINE_ID.Trim()) };
 
-        var result = await _db.NonQueryDataToSQLServer(sql, parameters, cancellationToken: cancellationToken);
+        var result = await _db.NonQueryAsync(sql, parameters, ct: cancellationToken);
 
         if (!result.Success)
             return OperationResult<bool>.Fail(result.Message);
@@ -673,7 +674,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
         List<PROJECTS_HEADER> currentprojectList = new List<PROJECTS_HEADER>();
         try
         {
-            var queryResult = await _db.GetDatatableFromSelectAsync(SQL_TRA_PROJECTS(_MODULE_ID_ENUM, is_Abandoned), null, cancellationToken: cancellationToken);
+            var queryResult = await _db.SelectAsync(SQL_TRA_PROJECTS(_MODULE_ID_ENUM, is_Abandoned), null, cancellationToken);
             if (!queryResult.Success || queryResult.DTResults == null)
             { return OperationResult<List<PROJECTS_HEADER>>.Fail($"Error : {queryResult.Message}");};
             // Here we need to feed objects
@@ -750,7 +751,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                 var parametersNextGate = new[]
                       { new SqlParameter("@ModuleId", _MODULE_ID),
                         new SqlParameter("@OppLineId", GetString(row, "OPPORTUNITY_LINE_ID"))};
-                var queryResultSt = await _db.GetDatatableFromSelectAsync(sqlNextGate, parametersNextGate, cancellationToken: cancellationToken);
+                var queryResultSt = await _db.SelectAsync(sqlNextGate, parametersNextGate, cancellationToken);
                 if (!queryResultSt.Success || queryResultSt.DTResults == null)
                 { return OperationResult<List<PROJECTS_HEADER>>.Fail($"Error inesperado: {queryResultSt.Message}"); }
                 PROJECT_STATUS CurStatus;
@@ -782,7 +783,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                 currentprojectList.Add(project);
               
                 }
-            return OperationResult<List<PROJECTS_HEADER>>.Ok(_db.DeepCopyList(currentprojectList));
+            return OperationResult<List<PROJECTS_HEADER>>.Ok(DeepCopyList(currentprojectList));
         }
         catch (Exception ex)
         {
@@ -967,7 +968,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
             var paramsSt = new[] { new SqlParameter("@OppLineId", Opp_Line_ID) ,
                                    new SqlParameter("@ModuleId", _MODULE_ID),
                                    new SqlParameter("@GateId", Gate_Id     )};
-            var queryPrStatus = await _db.GetDatatableFromSelectAsync(SQL_TRA_PROJECT_STATUS(), paramsSt, cancellationToken: cancellationToken);
+            var queryPrStatus = await _db.SelectAsync(SQL_TRA_PROJECT_STATUS(), paramsSt, cancellationToken);
             if (!queryPrStatus.Success || queryPrStatus.DTResults == null)
                 return OperationResult<PROJECT_DETAIL>.Fail($"Error: {queryPrStatus.Message}");
             if (queryPrStatus.RecordsAffected != 1)
@@ -980,7 +981,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
 
             // 1 — Cabecera del proyecto
             var paramsPro = new[] { new SqlParameter("@OppLineId", Opp_Line_ID) };
-            var queryResult = await _db.GetDatatableFromSelectAsync(SQL_TRA_PROJECTS_DETAIL(_MODULE_ID_ENUM), paramsPro, cancellationToken: cancellationToken);
+            var queryResult = await _db.SelectAsync(SQL_TRA_PROJECTS_DETAIL(_MODULE_ID_ENUM), paramsPro, cancellationToken);
             if (!queryResult.Success || queryResult.DTResults == null)
                 return OperationResult<PROJECT_DETAIL>.Fail($"Error: {queryResult.Message}");
             if (queryResult.RecordsAffected != 1)
@@ -1011,7 +1012,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                 new SqlParameter("@OppLineId", Opp_Line_ID),
                 new SqlParameter("@GateId",    Gate_Id)
             };
-            var commentsResult = await _db.GetDatatableFromSelectAsync(SQL_Projects_Deliverable_Comments(), paramsComments, cancellationToken: cancellationToken);
+            var commentsResult = await _db.SelectAsync(SQL_Projects_Deliverable_Comments(), paramsComments, cancellationToken);
             var commentMap = new Dictionary<(string sgateId, int delivId), List<DELIVERABLES_COMMENTS>>();
             if (commentsResult.Success && commentsResult.DTResults != null)
             {
@@ -1036,7 +1037,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                 new SqlParameter("@OppLineId", Opp_Line_ID),
                 new SqlParameter("@GateId",    Gate_Id)
             };
-            var actionsResult = await _db.GetDatatableFromSelectAsync(SQL_Projects_Gates(), paramsGate, cancellationToken: cancellationToken);
+            var actionsResult = await _db.SelectAsync(SQL_Projects_Gates(), paramsGate, cancellationToken);
             if (!actionsResult.Success || actionsResult.DTResults == null)
                 return OperationResult<PROJECT_DETAIL>.Fail($"Error querying actions: {actionsResult.Message}");
 
@@ -1064,7 +1065,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                     new SqlParameter("@ActionId",  curAction.ACTION_ID),
                     new SqlParameter("@ModuleId",  _MODULE_ID)
                 };
-                var delivResult = await _db.GetDatatableFromSelectAsync(SQL_Projects_Deliverables(), paramsDeliv, cancellationToken: cancellationToken);
+                var delivResult = await _db.SelectAsync(SQL_Projects_Deliverables(), paramsDeliv, cancellationToken);
                 if (!delivResult.Success || delivResult.DTResults == null)
                     return OperationResult<PROJECT_DETAIL>.Fail($"Error querying deliverables: {delivResult.Message}");
 
@@ -1124,7 +1125,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                 };
 
                     // Responsible comments (KEY_PROCESS='DELIV')
-                    var delivCommentsResult = await _db.GetDatatableFromSelectAsync(SQL_Projects_Deliverable_Comments_Per_Deliverable(), paramsCommentsDeliverable, cancellationToken: cancellationToken);
+                    var delivCommentsResult = await _db.SelectAsync(SQL_Projects_Deliverable_Comments_Per_Deliverable(), paramsCommentsDeliverable, cancellationToken);
                     var delivComments = new List<DELIVERABLES_COMMENTS>();
                     if (delivCommentsResult.Success && delivCommentsResult.DTResults != null)
                     {
@@ -1143,7 +1144,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                     }
 
                     // Accountant comments (KEY_PROCESS='ACC')
-                    var accCommentsResult = await _db.GetDatatableFromSelectAsync(SQL_Projects_Deliverable_Comments_Accountant_Per_Deliverable(), paramsCommentsAcc, cancellationToken: cancellationToken);
+                    var accCommentsResult = await _db.SelectAsync(SQL_Projects_Deliverable_Comments_Accountant_Per_Deliverable(), paramsCommentsAcc, cancellationToken);
                     var accComments = new List<DELIVERABLES_COMMENTS>();
                     if (accCommentsResult.Success && accCommentsResult.DTResults != null)
                     {

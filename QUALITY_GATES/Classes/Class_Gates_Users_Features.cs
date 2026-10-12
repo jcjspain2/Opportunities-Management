@@ -1,11 +1,12 @@
 using Microsoft.Data.SqlClient;
-using QUALITY_GATES.Data;
 using QUALITY_GATES.Models;
+using SqlDataLayer;
+using SqlDataLayer.Models;
+using static SqlDataLayer.SqlDbAccess;
 using System.Collections.Generic;
 using System.Data;
 using System.Threading;
 using System.Threading.Tasks;
-using static QUALITY_GATES.Data.SqlConnectionFactory;
 using static QUALITY_GATES.Tools.Static_Local_Functions;
 
 namespace QUALITY_GATES.Classes
@@ -17,7 +18,7 @@ namespace QUALITY_GATES.Classes
         /// </summary>
         /// <param name="Role">Must use Estructure for role</param>
         /// <returns>Sucess or fail with detailed message</returns>
-        public async Task<Return_SQL_Action> AllocateUserIDToDeliverable(string OPP_LINE_ID,
+        public async Task<SqlActionResult> AllocateUserIDToDeliverable(string OPP_LINE_ID,
                                                                           string STATUS_ID,
                                                                           string SGATE_ID,
                                                                           string DELIVERABLE_ID,
@@ -26,6 +27,10 @@ namespace QUALITY_GATES.Classes
                                                                           DeliverableRolesEstructure Role,
                                                                           CancellationToken cancellationToken = default)
         {
+            var authCheck = await Get_KeyProcess_Job_title_Restriction("ALLO_USER", USER_ID_WHO_REQUEST, cancellationToken);
+            if (!authCheck.Success)
+                return new SqlActionResult { Success = false, Message = authCheck.ErrorMessage };
+
             string Type_Alloc = Role switch
             {
                 DeliverableRolesEstructure.Responsible => "RESP",
@@ -39,7 +44,7 @@ namespace QUALITY_GATES.Classes
         /// </summary>
         /// <param name="Type_Alloc">RESP updates responsible, ACC updates accountant person</param>
         /// <returns>Sucess or fail with detailed message</returns>
-        private async Task<Return_SQL_Action> AllocateUserIDToDeliverable(string OPP_LINE_ID,
+        private async Task<SqlActionResult> AllocateUserIDToDeliverable(string OPP_LINE_ID,
                                                                           string STATUS_ID,
                                                                           string SGATE_ID,
                                                                           string DELIVERABLE_ID,
@@ -48,7 +53,7 @@ namespace QUALITY_GATES.Classes
                                                                           CancellationToken cancellationToken = default)
         {
             if (Type_Alloc != "RESP" && Type_Alloc != "ACC")
-                return new Return_SQL_Action
+                return new SqlActionResult
                 {
                     Success = false,
                     Message = $"Type_Alloc '{Type_Alloc}' is not valid. Allowed values: 'RESP' or 'ACC'.",
@@ -77,7 +82,7 @@ namespace QUALITY_GATES.Classes
                 new SqlParameter("@DELIVERABLE_ID", DELIVERABLE_ID)
             };
 
-            return await _db.NonQueryDataToSQLServer(sql, parameters, cancellationToken: cancellationToken);
+            return await _db.NonQueryAsync(sql, parameters, ct: cancellationToken);
         }
 
         /// <summary>
@@ -94,8 +99,8 @@ namespace QUALITY_GATES.Classes
 
             try
             {
-                var queryResult = await _db.GetDatatableFromSelectAsync(
-                    SQL_USERS_FITS_JOB_DESCRIPTION(), parameters, cancellationToken: cancellationToken);
+                var queryResult = await _db.SelectAsync(
+                    SQL_USERS_FITS_JOB_DESCRIPTION(), parameters, cancellationToken);
 
                 if (!queryResult.Success || queryResult.DTResults == null)
                     return OperationResult<List<USERS_DETAILS>>.Fail($"Error: {queryResult.Message}");
@@ -115,7 +120,7 @@ namespace QUALITY_GATES.Classes
                     });
                 }
 
-                return OperationResult<List<USERS_DETAILS>>.Ok(_db.DeepCopyList(userList));
+                return OperationResult<List<USERS_DETAILS>>.Ok(DeepCopyList(userList));
             }
             catch (Exception ex)
             {
@@ -135,8 +140,8 @@ namespace QUALITY_GATES.Classes
 
             try
             {
-                var queryResult = await _db.GetDatatableFromSelectAsync(
-                    SQL_GET_USER_DETAILS(), parameters, cancellationToken: cancellationToken);
+                var queryResult = await _db.SelectAsync(
+                    SQL_GET_USER_DETAILS(), parameters, cancellationToken);
 
                 if (!queryResult.Success || queryResult.DTResults == null)
                     return OperationResult<USERS_DETAILS>.Fail($"Error: {queryResult.Message}");

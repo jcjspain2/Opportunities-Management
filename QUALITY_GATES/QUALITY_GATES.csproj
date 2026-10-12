@@ -7,7 +7,7 @@
 
     <!-- Identidad del paquete -->
     <PackageId>QualityGates</PackageId>
-    <Version>1.0.55</Version>
+    <Version>1.0.56</Version>
     <Authors>Grupo Premo</Authors>
     <Description>Business logic and data access library for Quality Gates SRM</Description>
 
@@ -34,13 +34,12 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.3" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.3" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="8.*" />
+    <PackageReference Include="SqlDataLayer.NET8" Version="1.0.6" />
     <PackageReference Include="System.Text.Json" Version="10.0.3" />
   </ItemGroup>
 
   <ItemGroup>
-    <Reference Include="GrupoPremo.Intranet.Library">
-      <HintPath>bin\Debug\net8.0\GrupoPremo.Intranet.Library.dll</HintPath>
-    </Reference>
+    <PackageReference Include="GrupoPremo.Intranet.Library" Version="1.0.40" />
   </ItemGroup>
 
 </Project>

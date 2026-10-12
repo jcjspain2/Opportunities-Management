@@ -259,8 +259,11 @@ public class USERS_COLLABORATIVE
 
 public class DeliverableAllocationRow
 {
-    public string OpportunityName { get; set; } = string.Empty;
+    public string Opportunity_Line_id { get; set; } = string.Empty;
     public string StatusId { get; set; } = string.Empty;
+    public string GateId { get; set; } = string.Empty;
+    public string DeliverableId { get; set; } = string.Empty;
+    public string OpportunityName { get; set; } = string.Empty;
     public string DeliverableName { get; set; } = string.Empty;
     public string ResponsibleUserId { get; set; } = string.Empty;
     public string AccountableUserId { get; set; } = string.Empty;
