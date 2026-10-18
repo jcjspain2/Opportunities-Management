@@ -326,3 +326,45 @@ public static class PriorityExtensions
         throw new ArgumentException($"Valor de prioridad no v�lido: {value}");
     }
 }
+
+public class MEETING_HEADER
+{
+    public string StatusId                { get; set; } = string.Empty;
+    public string StatusDescription { get; set; } = string.Empty;
+    public DateOnly MeetingDate           { get; set; } = DateOnly.MinValue;
+    public string CurrentStatus           { get; set; } = string.Empty;
+    public string MeetingTarget           { get; set; } = string.Empty;
+    public string MeetingMinutes          { get; set; } = string.Empty;
+    public string MeetingUserGen          { get; set; } = string.Empty;
+    public DateTime MeetingDateGeneration { get; set; } = DateTime.MinValue;
+}
+
+public class MEETING_USER
+{
+    public string StatusId              { get; set; } = string.Empty;
+    public DateOnly MeetingDate         { get; set; } = DateOnly.MinValue;
+    public string MeetingUserRequest    { get; set; } = string.Empty;
+    public bool MeetingUserCame         { get; set; } = false;
+    public bool MeetingUserReviewed     { get; set; } = false;
+}
+
+public class MEETING_PROJECT
+{
+    public string StatusId              { get; set; } = string.Empty;
+    public DateOnly MeetingDate         { get; set; } = DateOnly.MinValue;
+    public string OpportunityLineId     { get; set; } = string.Empty;
+    public string MeetingMinutes        { get; set; } = string.Empty;
+}
+
+public class MEETING_DETAIL
+{
+    public MEETING_HEADER Header            { get; set; } = new();
+    public List<MEETING_USER> Users         { get; set; } = [];
+    public List<MEETING_PROJECT> Projects   { get; set; } = [];
+}
+
+public class PROJECT_STATUS_PICKING_LIST
+{
+    public string StatusId          { get; set; } = string.Empty;
+    public string StatusDescription { get; set; } = string.Empty;
+}

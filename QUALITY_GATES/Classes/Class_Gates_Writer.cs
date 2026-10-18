@@ -503,10 +503,10 @@ namespace QUALITY_GATES.Classes
         }
 
         private async Task<(bool IsValid, string? ErrorMessage)> ValidateDeliverableStatusExistsAsync(
-            string STATUS_ID_TO_UPDATE,
-            string keyProcess,
-            CancellationToken cancellationToken = default)
-        {
+                                                                                                        string STATUS_ID_TO_UPDATE,
+                                                                                                        string keyProcess,
+                                                                                                        CancellationToken cancellationToken = default)
+                                                                                                                                                         {
             var result = await _db.SelectAsync(
                 SQL_Validate_Deliverable_Status(),
                 new[] { new SqlParameter("@StatusIdToUpdate", STATUS_ID_TO_UPDATE),

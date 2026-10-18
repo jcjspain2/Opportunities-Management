@@ -8,6 +8,7 @@ using static SqlDataLayer.SqlDbAccess;
 using System.Data;
 using System.Data.Common;
 using static QUALITY_GATES.Tools.Static_Local_Functions;
+using System.ComponentModel.Design;
 
 namespace QUALITY_GATES.Classes;
 public partial class Class_Projects_Quality_Gates
@@ -94,7 +95,8 @@ public partial class Class_Projects_Quality_Gates
                    ACCOUNTABLE_JOB_TITLE,
                    SUPORTING_JOB_TITLE,
                    IsDeleted,
-                   GENERATES_NEXT_GATE
+                   GENERATES_NEXT_GATE,
+                   PATH_TO_SAVE
             FROM dbo.MAS_DELIVERABLES
             WHERE STATUS_ID= @GateID  AND (IsDeleted IS NULL OR IsDeleted = 0)
             """;
@@ -223,16 +225,17 @@ public partial class Class_Projects_Quality_Gates
 
         return queryResult;
     }
-    public async Task<SqlActionResult> Generate_Default_Gate_FromInitial(string GateID,
-                                                                          CancellationToken cancellationToken = default)
+    public async Task<SqlActionResult> Generate_Default_Gate_FromInitial(string GateID, CancellationToken cancellationToken = default)
     {
+        string _FolderToSave = string.Empty;
         const string sqlProjects = """ 
             SELECT
                 OPPORTUNITY_ID,
                 OPPORTUNITY_LINE_ID,
                 OPPORTUNITY_NAME,
                 OPPORTUNITY_LNE_NAME,
-                OWNER_SF
+                OWNER_SF,
+                MATNR
             FROM [dbo].[TRA_PROJECTS]
             WHERE Is_Q_GATES=1 AND IsGeneratedInitial = 0
             """; // For opportunity management
@@ -242,7 +245,8 @@ public partial class Class_Projects_Quality_Gates
                 OPPORTUNITY_LINE_ID,
                 OPPORTUNITY_NAME,
                 OPPORTUNITY_LNE_NAME,
-                OWNER_SF
+                OWNER_SF,
+                MATNR
             FROM [dbo].[TRA_PROJECTS]
             WHERE Is_Q_GATES_PR=1 AND IsGeneratedInitial_PR = 0
             """; // For Projects
@@ -278,7 +282,8 @@ public partial class Class_Projects_Quality_Gates
                    ACCOUNTABLE_JOB_TITLE,
                    SUPORTING_JOB_TITLE,
                    IsDeleted,
-                   GENERATES_NEXT_GATE
+                   GENERATES_NEXT_GATE,
+                   PATH_TO_SAVE
             FROM dbo.MAS_DELIVERABLES
             WHERE STATUS_ID= @GateID  AND (IsDeleted IS NULL OR IsDeleted = 0)         
             """;
@@ -304,7 +309,7 @@ public partial class Class_Projects_Quality_Gates
         { return queryResult; } // No records to process
 
         DataTable dtProjects = queryResult.DTResults;
-        
+      
         // Second recover default actions
         var parametersActGate = new[]
                    {new SqlParameter("@GateID", GateID) };
@@ -328,13 +333,7 @@ public partial class Class_Projects_Quality_Gates
         {
             foreach (DataRow rowP in dtProjects.Rows) // Iterate for each new project generate default actions + Deliverables
             {
-                //If gate PCA then we have to create deliverables in an especicic address
-           
-                string _FolderToSave = string.Empty;
-                if (GateID == "PCA")
-                {
-                    _FolderToSave = "https://grupopremo.sharepoint.com/sites/GlobalProjectManagement/OpportunitiesSFDocs/" + rowP["OPPORTUNITY_LINE_ID"].ToString();
-                }
+                              
                 // Insert Gate status in TRA_PROJECTS_STATUS
                 var parametersStatus = new[]
                     {
@@ -374,6 +373,21 @@ public partial class Class_Projects_Quality_Gates
                 }
                 foreach (DataRow rowD in dtDeliverables.Rows) // Iterate for each new project generate default actions + Deliverables
                 {
+                    //If gate PCA then we have to create deliverables in an especicic address
+                    switch (GateID)
+                    {
+                        case "PCA":
+                            _FolderToSave = "https://grupopremo.sharepoint.com/sites/GlobalProjectManagement/OpportunitiesSFDocs/" + rowP["OPPORTUNITY_LINE_ID"].ToString();
+                            break;
+                        case "DE_VAL":
+                            _FolderToSave = @$"https://grupopremo.sharepoint.com/sites/GlobalProjectManagement/LinkedProjects/{rowP["MATNR"].ToString().Trim()}"+ rowD["PATH_TO_SAVE"].ToString();
+                            break;
+                        default:
+                            _FolderToSave = string.Empty;
+                            break;
+
+                    }
+
                     // Deliverables
                     var parametersDel = new[]
                   {
