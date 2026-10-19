@@ -2,6 +2,13 @@ namespace QUALITY_GATES.Models;
 
 
 // To display top level information in projects like dashboards
+
+/// <summary>
+/// Represents the header information for projects, typically used in dashboards to display top-level project details.
+/// </summary>
+/// <remarks>This class encapsulates various properties related to project opportunities, customer details, sales
+/// information,  SAP data, plant-related data, and project timelines. It provides a comprehensive overview of a
+/// project's status  and metrics over multiple years.</remarks>
 public class PROJECTS_HEADER
 {
     public string OPP_ID { get; set; } = string.Empty;
@@ -46,7 +53,9 @@ public class PROJECTS_HEADER
     public int TOTAL_DELIVERABLES_PENDING_ACCOUNTANT { get; set; } = 0;
     public List<PROJECT_STATUS> List_Project_Status { get; set; } = new();
 }
-
+/// <summary>
+/// Maximium details of a project, including the list of actions and deliverables for the current gate, previously we need to choose a projects
+/// </summary>
 public class PROJECT_DETAIL
 {
     public string OPP_ID { get; set; } = string.Empty;
@@ -59,7 +68,49 @@ public class PROJECT_DETAIL
     public string LINK_TO_PDCC { get; set; } = string.Empty;
     public List<GATES_ACTIONS> List_Actions { get; set; } = new();
 }
+/// <summary>
+/// Model for creating a new Action within a selected project
+/// </summary>
+public class Manual_Creation_Action
+{  
+    public string OPP_LINE_ID { get; set; } = string.Empty; // SF ID
+    public string STATUS_ID { get; set; } = string.Empty; // PCA
+    public string ACTION_ID { get; set; } = string.Empty; // PCA_1
+    public int ACTION_SEQUENCE { get; set; } = 10;
+    public string ACTION_TARGET { get; set; } = string.Empty;
+    public DateOnly PLANNED_START_DATE { get; set; } = DateOnly.MinValue;
+    public DateOnly PLANNED_END_DATE { get; set; } = DateOnly.MinValue;
 
+    public List<Manual_Creation_Deliverable> LIST_DELIVERABLES = new();
+}
+/// <summary>
+/// Child model for creation of new actions
+/// </summary>
+public class Manual_Creation_Deliverable() // Only can be used as child class
+{
+    public int DEL_SEQUENCE { get; set; } = 10;
+    public string DELIVERABLE_ACTION { get; set; } = string.Empty;
+    public string DELIVERABLE_ACEPTANCE_CRITERIA { get; set; } = string.Empty;
+    public string RESPONSIBLE_JOB_TITLE { get; set; } = string.Empty;
+    public string ACCOUNTABLE_JOB_TITLE { get; set; } = string.Empty;
+    public string PATH_TO_SAVE { get; set; } = string.Empty;
+    public int EFFORT_RATE { get; set; } = 1;
+
+}
+public class Manual_Creation_Deliverable_From_Existing_Action() // Only can be used as child class
+{
+    public string OPP_LINE_ID { get; set; } = string.Empty; // SF ID
+    public string STATUS_ID { get; set; } = string.Empty; // PCA
+    public string ACTION_ID { get; set; } = string.Empty; // PCA_1
+    public int DEL_SEQUENCE { get; set; } = 10; // Should be last one existing on project
+    public string DELIVERABLE_ACTION { get; set; } = string.Empty;
+    public string DELIVERABLE_ACEPTANCE_CRITERIA { get; set; } = string.Empty;
+    public string RESPONSIBLE_JOB_TITLE { get; set; } = string.Empty;
+    public string ACCOUNTABLE_JOB_TITLE { get; set; } = string.Empty;
+    public string PATH_TO_SAVE { get; set; } = string.Empty;
+    public int EFFORT_RATE { get; set; } = 1;
+
+}
 public class PROJECT_STATUS
 {
     public string GATE_STATUS_ID { get; set; } = string.Empty;
@@ -255,6 +306,11 @@ public class USERS_COLLABORATIVE
 {
     public string UserId { get; set; } = string.Empty;
     public string Responsible_Task_Comment { get; set; } = string.Empty;
+}
+public class JOB_TITLE
+{
+    public string JOB_TITLE_ID { get; set; } = string.Empty;
+    public string JOB_TITLE_DESCRIPTION { get; set; } = string.Empty;
 }
 
 public class DeliverableAllocationRow

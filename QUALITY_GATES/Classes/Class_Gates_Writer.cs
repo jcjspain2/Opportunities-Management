@@ -501,6 +501,365 @@ namespace QUALITY_GATES.Classes
                 throw;
             }
         }
+        public async Task<OperationResult<Manual_Creation_Action>> Create_Manual_Action(Manual_Creation_Action ActionToCreate,
+                                                                                        string UserRequester = "System",
+                                                                                        CancellationToken cancellationToken = default)
+        {
+            // Step 1: Input validation
+            if (string.IsNullOrWhiteSpace(ActionToCreate.OPP_LINE_ID))
+                return OperationResult<Manual_Creation_Action>.Fail("OPP_LINE_ID is required.");
+            if (string.IsNullOrWhiteSpace(ActionToCreate.STATUS_ID))
+                return OperationResult<Manual_Creation_Action>.Fail("STATUS_ID is required.");
+            if (string.IsNullOrWhiteSpace(ActionToCreate.ACTION_TARGET))
+                return OperationResult<Manual_Creation_Action>.Fail("ACTION_TARGET is required.");
+            if (ActionToCreate.LIST_DELIVERABLES.Count == 0)
+                return OperationResult<Manual_Creation_Action>.Fail("At least one deliverable is required.");
+            if (ActionToCreate.PLANNED_START_DATE != DateOnly.MinValue &&
+                ActionToCreate.PLANNED_END_DATE   != DateOnly.MinValue &&
+                ActionToCreate.PLANNED_START_DATE  > ActionToCreate.PLANNED_END_DATE)
+                return OperationResult<Manual_Creation_Action>.Fail("PLANNED_START_DATE cannot be after PLANNED_END_DATE.");
+
+            // Step 2: Verify the gate has been generated for this project
+            var gateCheckResult = await _db.SelectAsync(
+                SQL_Check_Gate_Exists_For_Project(),
+                new[]
+                {
+                    new SqlParameter("@OppLineId", ActionToCreate.OPP_LINE_ID),
+                    new SqlParameter("@StatusId",  ActionToCreate.STATUS_ID)
+                },
+                cancellationToken);
+
+            if (!gateCheckResult.Success || gateCheckResult.DTResults == null)
+                return OperationResult<Manual_Creation_Action>.Fail($"Error checking gate existence: {gateCheckResult.Message}");
+
+            if (Convert.ToInt32(gateCheckResult.DTResults.Rows[0][0]) == 0)
+                return OperationResult<Manual_Creation_Action>.Fail(
+                    $"Gate '{ActionToCreate.STATUS_ID}' has not been generated for project '{ActionToCreate.OPP_LINE_ID}'.");
+
+            // Steps 3 + 4: SGATE_ID generation and inserts are inside one transaction
+            // to prevent duplicate SGATE_IDs under concurrent requests.
+            DateTime planStart = ActionToCreate.PLANNED_START_DATE == DateOnly.MinValue
+                ? DateTime.Now
+                : ActionToCreate.PLANNED_START_DATE.ToDateTime(TimeOnly.MinValue);
+            DateTime planEnd = ActionToCreate.PLANNED_END_DATE == DateOnly.MinValue
+                ? DateTime.Now
+                : ActionToCreate.PLANNED_END_DATE.ToDateTime(TimeOnly.MinValue);
+
+            await using var conn = new SqlConnection(_db.ConnectionString);
+            await conn.OpenAsync(cancellationToken);
+            await using var tx = conn.BeginTransaction();
+            try
+            {
+                // Generate SGATE_ID inside the transaction — atomic with the INSERT
+                var countResult = await _db.SelectAsync(
+                    SQL_Count_Manual_Actions_For_Gate(),
+                    new[]
+                    {
+                        new SqlParameter("@OppLineId", ActionToCreate.OPP_LINE_ID),
+                        new SqlParameter("@StatusId",  ActionToCreate.STATUS_ID)
+                    },
+                    cancellationToken);
+
+                if (!countResult.Success || countResult.DTResults == null)
+                {
+                    tx.Rollback();
+                    return OperationResult<Manual_Creation_Action>.Fail($"Error generating action ID: {countResult.Message}");
+                }
+
+                int manualCount = Convert.ToInt32(countResult.DTResults.Rows[0][0]);
+                ActionToCreate.ACTION_ID = $"{ActionToCreate.STATUS_ID}_M{(manualCount + 1):D2}";
+
+                var actionParams = new[]
+                {
+                    new SqlParameter("@OppLineId",  ActionToCreate.OPP_LINE_ID),
+                    new SqlParameter("@StatusId",   ActionToCreate.STATUS_ID),
+                    new SqlParameter("@SGateId",    ActionToCreate.ACTION_ID),
+                    new SqlParameter("@Sequence",   ActionToCreate.ACTION_SEQUENCE),
+                    new SqlParameter("@GateTarget", ActionToCreate.ACTION_TARGET),
+                    new SqlParameter("@PlanStart",  planStart),
+                    new SqlParameter("@PlanEnd",    planEnd),
+                    new SqlParameter("@User",       UserRequester)
+                };
+
+                var actionResult = await _db.NonQueryAsync(SQL_Insert_Manual_Action(), actionParams, tx, cancellationToken);
+                if (!actionResult.Success)
+                {
+                    tx.Rollback();
+                    return OperationResult<Manual_Creation_Action>.Fail($"Error inserting action: {actionResult.Message}");
+                }
+
+                // DELIVERABLE_ID assigned by index (×10) — never relies on caller's DEL_SEQUENCE
+                // to avoid PK violations when multiple deliverables share the default value of 10.
+                for (int i = 0; i < ActionToCreate.LIST_DELIVERABLES.Count; i++)
+                {
+                    var del = ActionToCreate.LIST_DELIVERABLES[i];
+                    int deliverableId = (i + 1) * 10;
+
+                    var delParams = new[]
+                    {
+                        new SqlParameter("@OppLineId",      ActionToCreate.OPP_LINE_ID),
+                        new SqlParameter("@StatusId",       ActionToCreate.STATUS_ID),
+                        new SqlParameter("@SGateId",        ActionToCreate.ACTION_ID),
+                        new SqlParameter("@DeliverableId",  deliverableId),
+                        new SqlParameter("@DelName",        del.DELIVERABLE_ACTION),
+                        new SqlParameter("@AccepCriteria",  del.DELIVERABLE_ACEPTANCE_CRITERIA),
+                        new SqlParameter("@PlanStart",      planStart),
+                        new SqlParameter("@PlanEnd",        planEnd),
+                        new SqlParameter("@RespJobId",      del.RESPONSIBLE_JOB_TITLE),
+                        new SqlParameter("@AccJobId",       del.ACCOUNTABLE_JOB_TITLE),
+                        new SqlParameter("@PathToSave",     del.PATH_TO_SAVE),
+                        new SqlParameter("@User",           UserRequester)
+                    };
+
+                    var delResult = await _db.NonQueryAsync(SQL_Insert_Manual_Deliverable(), delParams, tx, cancellationToken);
+                    if (!delResult.Success)
+                    {
+                        tx.Rollback();
+                        return OperationResult<Manual_Creation_Action>.Fail(
+                            $"Error inserting deliverable {deliverableId}: {delResult.Message}");
+                    }
+                }
+
+                tx.Commit();
+                return OperationResult<Manual_Creation_Action>.Ok(ActionToCreate);
+            }
+            catch
+            {
+                tx.Rollback();
+                throw;
+            }
+        }
+
+        private static string SQL_Check_Gate_Exists_For_Project() => @"
+            SELECT COUNT(1)
+            FROM   dbo.TRA_PROJECTS_STATUS
+            WHERE  OPP_LINE_ID = @OppLineId
+              AND  STATUS_ID   = @StatusId";
+
+        private static string SQL_Count_Manual_Actions_For_Gate() => @"
+            SELECT COUNT(*)
+            FROM   dbo.TRA_PROJECTS_GATES
+            WHERE  OPP_LINE_ID = @OppLineId
+              AND  STATUS_ID   = @StatusId
+              AND  GATE_TYPE   = 'MANUAL'";
+
+        private static string SQL_Insert_Manual_Action() => @"
+            INSERT INTO dbo.TRA_PROJECTS_GATES
+                   (OPP_LINE_ID, STATUS_ID, SGATE_ID, GATE_SEQUENCE, GATE_TYPE,
+                    GATE_STATUS_ID, GATE_TEXT_EXPLANATION, RESPONSIBLE_USER_ID,
+                    PLANNED_START_DATE, PLANNED_END_DATE, ACTUAL_START_DATE, ACTUAL_END_DATE,
+                    CREATED_BY, CREATED_DATE, MODIFIED_BY, MODIFIED_DATE)
+            VALUES (@OppLineId, @StatusId, @SGateId, @Sequence, 'MANUAL',
+                    'NOTSTARTED', @GateTarget, '',
+                    @PlanStart, @PlanEnd, GETDATE(), GETDATE(),
+                    @User, GETDATE(), @User, GETDATE())";
+
+        private static string SQL_Insert_Manual_Deliverable() => @"
+            INSERT INTO dbo.TRA_PROJECTS_DELIVERABLES
+                   (OPP_LINE_ID, STATUS_ID, SGATE_ID, DELIVERABLE_ID,
+                    DELIVERABLE_STATUS_ID, ACCOUNTABLE_STATUS_ID, DELIVERABLE_CREATION_TYPE,
+                    DELIVERABLE_NAME, DELIVERABLE_ACEPTANCE_CRITERIA,
+                    PLANNED_START_DATE, PLANNED_END_DATE, ACTUAL_START_DATE, ACTUAL_END_DATE,
+                    USER_START_DATE, USER_FINISH_DATE,
+                    RESPONSIBLE_JOB_ID, ACCOUNTABLE_JOB_ID,
+                    RESPONSIBLE_USER_ID, ACCOUNTABLE_USER_ID,
+                    CREATED_BY, CREATED_DATE, MODIFIED_BY, MODIFIED_DATE,
+                    PATH_TO_SAVE, NEXT_GATE_TRIGGERS)
+            VALUES (@OppLineId, @StatusId, @SGateId, @DeliverableId,
+                    'NOTSTARTED', 'NOTSTARTED', 'MANUAL',
+                    @DelName, @AccepCriteria,
+                    @PlanStart, @PlanEnd, GETDATE(), GETDATE(),
+                    GETDATE(), GETDATE(),
+                    @RespJobId, @AccJobId,
+                    '', '',
+                    @User, GETDATE(), @User, GETDATE(),
+                    @PathToSave, 0)";
+        /// <summary>
+        /// Adds a deliverable request into an existing action
+        /// </summary>
+        /// <param name="DeliverableToCreate"></param>
+        /// <param name="UserRequester"></param>
+        /// <param name="cancellationToken"></param>
+        /// <returns></returns>
+        public async Task<OperationResult<bool>> Add_Deliverable_To_Existing_Action(Manual_Creation_Deliverable_From_Existing_Action DeliverableToCreate,
+                                                                                    string UserRequester = "System",
+                                                                                    CancellationToken cancellationToken = default)
+        {
+            // Step 1: Field validation — no DB
+            if (string.IsNullOrWhiteSpace(DeliverableToCreate.OPP_LINE_ID))
+                return OperationResult<bool>.Fail("OPP_LINE_ID is required.");
+            if (string.IsNullOrWhiteSpace(DeliverableToCreate.STATUS_ID))
+                return OperationResult<bool>.Fail("STATUS_ID is required.");
+            if (string.IsNullOrWhiteSpace(DeliverableToCreate.ACTION_ID))
+                return OperationResult<bool>.Fail("ACTION_ID is required.");
+            if (string.IsNullOrWhiteSpace(DeliverableToCreate.DELIVERABLE_ACTION))
+                return OperationResult<bool>.Fail("DELIVERABLE_ACTION is required.");
+            if (string.IsNullOrWhiteSpace(DeliverableToCreate.DELIVERABLE_ACEPTANCE_CRITERIA))
+                return OperationResult<bool>.Fail("DELIVERABLE_ACEPTANCE_CRITERIA is required.");
+            if (string.IsNullOrWhiteSpace(DeliverableToCreate.RESPONSIBLE_JOB_TITLE))
+                return OperationResult<bool>.Fail("RESPONSIBLE_JOB_TITLE is required.");
+            if (string.IsNullOrWhiteSpace(DeliverableToCreate.ACCOUNTABLE_JOB_TITLE))
+                return OperationResult<bool>.Fail("ACCOUNTABLE_JOB_TITLE is required.");
+
+            // Step 2: Verify OPP_LINE_ID exists in TRA_PROJECTS
+            var projectCheck = await _db.SelectAsync(
+                SQL_Check_Project_Exists(),
+                new[] { new SqlParameter("@OppLineId", DeliverableToCreate.OPP_LINE_ID) },
+                cancellationToken);
+
+            if (!projectCheck.Success || projectCheck.DTResults == null)
+                return OperationResult<bool>.Fail($"Error checking project: {projectCheck.Message}");
+            if (Convert.ToInt32(projectCheck.DTResults.Rows[0][0]) == 0)
+                return OperationResult<bool>.Fail($"Project '{DeliverableToCreate.OPP_LINE_ID}' not found.");
+
+            // Step 3: Verify both job titles exist in MAS_JOB_TITLES — two independent queries,
+            // both always run so all errors are reported together.
+            var jobErrors = new List<string>();
+
+            var respJobCheck = await _db.SelectAsync(
+                SQL_Check_Job_Title_Exists(),
+                new[] { new SqlParameter("@JobTitleId", DeliverableToCreate.RESPONSIBLE_JOB_TITLE) },
+                cancellationToken);
+
+            if (!respJobCheck.Success || respJobCheck.DTResults == null)
+                return OperationResult<bool>.Fail($"Error checking RESPONSIBLE_JOB_TITLE: {respJobCheck.Message}");
+            if (Convert.ToInt32(respJobCheck.DTResults.Rows[0][0]) == 0)
+                jobErrors.Add($"RESPONSIBLE_JOB_TITLE '{DeliverableToCreate.RESPONSIBLE_JOB_TITLE}' is not a valid job title.");
+
+            var accJobCheck = await _db.SelectAsync(
+                SQL_Check_Job_Title_Exists(),
+                new[] { new SqlParameter("@JobTitleId", DeliverableToCreate.ACCOUNTABLE_JOB_TITLE) },
+                cancellationToken);
+
+            if (!accJobCheck.Success || accJobCheck.DTResults == null)
+                return OperationResult<bool>.Fail($"Error checking ACCOUNTABLE_JOB_TITLE: {accJobCheck.Message}");
+            if (Convert.ToInt32(accJobCheck.DTResults.Rows[0][0]) == 0)
+                jobErrors.Add($"ACCOUNTABLE_JOB_TITLE '{DeliverableToCreate.ACCOUNTABLE_JOB_TITLE}' is not a valid job title.");
+
+            if (jobErrors.Count > 0)
+                return OperationResult<bool>.Fail(string.Join(" | ", jobErrors));
+
+            // Step 4: Verify action exists in TRA_PROJECTS_GATES
+            var actionCheck = await _db.SelectAsync(SQL_Check_Action_Exists(),
+                                                    new[]
+                                                    {
+                                                        new SqlParameter("@OppLineId", DeliverableToCreate.OPP_LINE_ID),
+                                                        new SqlParameter("@StatusId",  DeliverableToCreate.STATUS_ID),
+                                                        new SqlParameter("@ActionId",  DeliverableToCreate.ACTION_ID)
+                                                    },
+                                                    cancellationToken);
+
+            if (!actionCheck.Success || actionCheck.DTResults == null)
+                return OperationResult<bool>.Fail($"Error checking action: {actionCheck.Message}");
+            if (Convert.ToInt32(actionCheck.DTResults.Rows[0][0]) == 0)
+                return OperationResult<bool>.Fail($"Action '{DeliverableToCreate.ACTION_ID}' not found for project '{DeliverableToCreate.OPP_LINE_ID}' / gate '{DeliverableToCreate.STATUS_ID}'.");
+
+            // Steps 5+6: MAX + INSERT inside one transaction — atomic to prevent duplicate DELIVERABLE_ID
+            await using var conn = new SqlConnection(_db.ConnectionString);
+            await conn.OpenAsync(cancellationToken);
+            await using var tx = conn.BeginTransaction();
+            try
+            {
+                var lastDelResult = await _db.SelectAsync(  SQL_Get_Last_Deliverable_Row(),
+                                                            new[]
+                                                            {
+                                                                new SqlParameter("@OppLineId", DeliverableToCreate.OPP_LINE_ID),
+                                                                new SqlParameter("@StatusId",  DeliverableToCreate.STATUS_ID),
+                                                                new SqlParameter("@ActionId",  DeliverableToCreate.ACTION_ID)
+                                                            },
+                                                            cancellationToken);
+
+                if (!lastDelResult.Success || lastDelResult.DTResults == null)
+                {
+                    tx.Rollback();
+                    return OperationResult<bool>.Fail($"Error retrieving last deliverable: {lastDelResult.Message}");
+                }
+
+                if (lastDelResult.DTResults.Rows.Count == 0)
+                {
+                    tx.Rollback();
+                    return OperationResult<bool>.Fail($"No deliverables found for action '{DeliverableToCreate.ACTION_ID}'. Cannot add a deliverable to an empty action.");
+                }
+
+                int newDeliverableId = GetInt(lastDelResult.DTResults.Rows[0], "DELIVERABLE_ID") + 10;
+                string pathToSave    = GetString(lastDelResult.DTResults.Rows[0], "PATH_TO_SAVE");
+
+                var insertParams = new[]
+                                        {
+                                            new SqlParameter("@OppLineId",     DeliverableToCreate.OPP_LINE_ID),
+                                            new SqlParameter("@StatusId",      DeliverableToCreate.STATUS_ID),
+                                            new SqlParameter("@ActionId",      DeliverableToCreate.ACTION_ID),
+                                            new SqlParameter("@DeliverableId", newDeliverableId),
+                                            new SqlParameter("@DelName",       DeliverableToCreate.DELIVERABLE_ACTION),
+                                            new SqlParameter("@AccepCriteria", DeliverableToCreate.DELIVERABLE_ACEPTANCE_CRITERIA),
+                                            new SqlParameter("@RespJobId",     DeliverableToCreate.RESPONSIBLE_JOB_TITLE),
+                                            new SqlParameter("@AccJobId",      DeliverableToCreate.ACCOUNTABLE_JOB_TITLE),
+                                            new SqlParameter("@PathToSave",    pathToSave),
+                                            new SqlParameter("@User",          UserRequester)
+                                        };
+
+                var insertResult = await _db.NonQueryAsync(SQL_Insert_Single_Manual_Deliverable(), insertParams, tx, cancellationToken);
+                if (!insertResult.Success)
+                {
+                    tx.Rollback();
+                    return OperationResult<bool>.Fail($"Error inserting deliverable: {insertResult.Message}");
+                }
+
+                tx.Commit();
+                return OperationResult<bool>.Ok(true);
+            }
+            catch
+            {
+                tx.Rollback();
+                throw;
+            }
+        }
+
+        private static string SQL_Check_Project_Exists() => @"
+            SELECT COUNT(1)
+            FROM   dbo.TRA_PROJECTS
+            WHERE  OPPORTUNITY_LINE_ID = @OppLineId";
+
+        private static string SQL_Check_Job_Title_Exists() => @"
+            SELECT COUNT(1)
+            FROM   dbo.MAS_JOB_TITLES
+            WHERE  JOB_TITLE_ID = @JobTitleId";
+
+        private static string SQL_Check_Action_Exists() => @"
+            SELECT COUNT(1)
+            FROM   dbo.TRA_PROJECTS_GATES
+            WHERE  OPP_LINE_ID = @OppLineId
+              AND  STATUS_ID   = @StatusId
+              AND  SGATE_ID    = @ActionId";
+
+        private static string SQL_Get_Last_Deliverable_Row() => @"
+            SELECT TOP 1 DELIVERABLE_ID, PATH_TO_SAVE
+            FROM   dbo.TRA_PROJECTS_DELIVERABLES
+            WHERE  OPP_LINE_ID = @OppLineId
+              AND  STATUS_ID   = @StatusId
+              AND  SGATE_ID    = @ActionId
+            ORDER BY DELIVERABLE_ID DESC";
+
+        private static string SQL_Insert_Single_Manual_Deliverable() => @"
+            INSERT INTO dbo.TRA_PROJECTS_DELIVERABLES
+                   (OPP_LINE_ID, STATUS_ID, SGATE_ID, DELIVERABLE_ID,
+                    DELIVERABLE_STATUS_ID, ACCOUNTABLE_STATUS_ID, DELIVERABLE_CREATION_TYPE,
+                    DELIVERABLE_NAME, DELIVERABLE_ACEPTANCE_CRITERIA,
+                    PLANNED_START_DATE, PLANNED_END_DATE, ACTUAL_START_DATE, ACTUAL_END_DATE,
+                    USER_START_DATE, USER_FINISH_DATE,
+                    RESPONSIBLE_JOB_ID, ACCOUNTABLE_JOB_ID,
+                    RESPONSIBLE_USER_ID, ACCOUNTABLE_USER_ID,
+                    CREATED_BY, CREATED_DATE, MODIFIED_BY, MODIFIED_DATE,
+                    PATH_TO_SAVE, NEXT_GATE_TRIGGERS)
+            VALUES (@OppLineId, @StatusId, @ActionId, @DeliverableId,
+                    'NOTSTARTED', 'NOTSTARTED', 'MANUAL',
+                    @DelName, @AccepCriteria,
+                    GETDATE(), GETDATE(), GETDATE(), GETDATE(),
+                    GETDATE(), GETDATE(),
+                    @RespJobId, @AccJobId,
+                    '', '',
+                    @User, GETDATE(), @User, GETDATE(),
+                    @PathToSave, 0)";
 
         private async Task<(bool IsValid, string? ErrorMessage)> ValidateDeliverableStatusExistsAsync(
                                                                                                         string STATUS_ID_TO_UPDATE,

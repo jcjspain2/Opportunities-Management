@@ -193,8 +193,45 @@ namespace QUALITY_GATES.Classes
                 LEFT JOIN dbo.MAS_USERS_CADENA T2 on T1.EmailAddress=T2.Email
                 LEFT JOIN dbo.MAS_JOB_TITLES_CADENA T3 ON T3.JOB_TITLE_CADENA=T2.jobTitle
                 LEFT JOIN dbo.MAS_JOB_TITLES T4 ON T3.JOB_TITLE_ID=T4.JOB_TITLE_ID
-                WHERE T1.Enabled=1 and T1.EmailAddress <> '' AND T3.JOB_TITLE_ID=@JOB_TITLE_ID "; 
+                WHERE T1.Enabled=1 and T1.EmailAddress <> '' AND T3.JOB_TITLE_ID=@JOB_TITLE_ID ";
 
         }
+
+        /// <summary>
+        /// Returns the full catalog of job titles for use in pickers and dropdowns.
+        /// </summary>
+        public async Task<OperationResult<List<JOB_TITLE>>> Get_All_Job_Titles(
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var queryResult = await _db.SelectAsync(SQL_GET_ALL_JOB_TITLES(), null, cancellationToken);
+
+                if (!queryResult.Success || queryResult.DTResults == null)
+                    return OperationResult<List<JOB_TITLE>>.Fail($"Error: {queryResult.Message}");
+
+                var list = new List<JOB_TITLE>();
+                foreach (DataRow row in queryResult.DTResults.Rows)
+                {
+                    list.Add(new JOB_TITLE
+                    {
+                        JOB_TITLE_ID          = GetString(row, "JOB_TITLE_ID"),
+                        JOB_TITLE_DESCRIPTION = GetString(row, "JOB_TITLE_DESCRIPTION")
+                    });
+                }
+
+                return OperationResult<List<JOB_TITLE>>.Ok(list);
+            }
+            catch (Exception ex)
+            {
+                return OperationResult<List<JOB_TITLE>>.Fail($"Error: {ex.Message}");
+            }
+        }
+
+        private static string SQL_GET_ALL_JOB_TITLES() => @"
+            SELECT JOB_TITLE_ID, JOB_TITLE_DESCRIPTION
+            FROM   dbo.MAS_JOB_TITLES
+            WHERE  IsDeleted = 0
+            ORDER BY JOB_TITLE_DESCRIPTION";
     }
 }
