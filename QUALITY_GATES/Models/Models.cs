@@ -143,6 +143,8 @@ public class MY_TASKS
     public StatusState CurrentStatus { get; set; } = StatusState.NotStarted;
     public string OPP_NAME { get; set; } = string.Empty;
     public string OPP_LINE_NAME { get; set; } = string.Empty;
+    public string MATNR { get; set; } = string.Empty;
+    public string DESCRIPTION { get; set; } = string.Empty;
     public string STATUS_NAME { get; set; } = string.Empty; 
     public string ACTION_NAME { get; set; } = string.Empty;
     public string DELIVERABLE_DESCRIPTION { get; set; } = string.Empty;
@@ -161,6 +163,8 @@ public class TASKS_PENDING_TO_ALLOCATE
     public StatusState CurrentStatus { get; set; } = StatusState.NotStarted;
     public string OPP_NAME { get; set; } = string.Empty;
     public string OPP_LINE_NAME { get; set; } = string.Empty;
+    public string MATNR { get; set; } = string.Empty;
+    public string DESCRIPTION { get; set; } = string.Empty;
     public string STATUS_NAME { get; set; } = string.Empty;
     public string ACTION_NAME { get; set; } = string.Empty;
     public string DELIVERABLE_DESCRIPTION { get; set; } = string.Empty;

@@ -294,9 +294,11 @@ public partial class Class_Projects_Quality_Gates
         {
             case Module_ID.Q_GATES:
                 _SqlProject = sqlProjects;
+                GateID = "PCA";
                 break;
             case Module_ID.Q_GATES_PR:
                 _SqlProject = sqlProjects_PR;
+                GateID = "DE_VAL";
                 break;
             default:
                 _SqlProject = string.Empty;

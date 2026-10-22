@@ -231,7 +231,6 @@ namespace QUALITY_GATES.Classes
         private static string SQL_GET_ALL_JOB_TITLES() => @"
             SELECT JOB_TITLE_ID, JOB_TITLE_DESCRIPTION
             FROM   dbo.MAS_JOB_TITLES
-            WHERE  IsDeleted = 0
             ORDER BY JOB_TITLE_DESCRIPTION";
     }
 }
