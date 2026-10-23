@@ -44,7 +44,8 @@ public partial class Class_Projects_Quality_Gates
                               T2.IS_IN_PROGRESS RESP_IN_PROGRESS,
                               T3.IS_INITIAL_STATE ACC_INITIAL_STATE,
                               T3.IS_PENDING_REVIEW ACC_PENDING_STATE,
-                              T3.IS_IN_PROGRESS ACC_IN_PROGRESS
+                              T3.IS_IN_PROGRESS ACC_IN_PROGRESS,
+                              T1.EFFORT_RATE
                        FROM dbo.TRA_PROJECTS_DELIVERABLES T1
                        JOIN dbo.TRA_PROJECTS TP ON TP.OPPORTUNITY_LINE_ID=T1.OPP_LINE_ID AND TP.IsLost_SF=0 AND TP.IsAbandoned=0 AND TP.Is_Q_GATES=1
                        JOIN dbo.TRA_PROJECTS_STATUS AS TS ON TS.OPP_LINE_ID=T1.OPP_LINE_ID AND TS.STATUS_ID=T1.STATUS_ID AND TS.MODULE_ID='Q_GATES'
@@ -67,7 +68,8 @@ public partial class Class_Projects_Quality_Gates
                               T2.IS_IN_PROGRESS RESP_IN_PROGRESS,
                               T3.IS_INITIAL_STATE ACC_INITIAL_STATE,
                               T3.IS_PENDING_REVIEW ACC_PENDING_STATE,
-                              T3.IS_IN_PROGRESS ACC_IN_PROGRESS
+                              T3.IS_IN_PROGRESS ACC_IN_PROGRESS,
+                              T1.EFFORT_RATE
                FROM dbo.TRA_PROJECTS_DELIVERABLES T1
                JOIN dbo.TRA_PROJECTS TP ON TP.OPPORTUNITY_LINE_ID=T1.OPP_LINE_ID AND TP.IsLost_SF=0 AND TP.IsAbandoned=0 AND TP.Is_Q_GATES_PR=1
                JOIN dbo.TRA_PROJECTS_STATUS AS TS ON TS.OPP_LINE_ID=T1.OPP_LINE_ID AND TS.STATUS_ID=T1.STATUS_ID AND TS.MODULE_ID='Q_GATES_PR'
@@ -101,7 +103,7 @@ public partial class Class_Projects_Quality_Gates
                 AccountableJobTitle = GetString(row, "JOB_TITLE_ACC"),
                 ResponsibleState    = ResolveAllocationState(row, "RESP_INITIAL_STATE", "RESP_IN_PROGRESS", "RESP_PENDING_REVIEW"),
                 AccountableState    = ResolveAllocationState(row, "ACC_INITIAL_STATE", "ACC_IN_PROGRESS", "ACC_PENDING_STATE"),
-                EffortRate          = 0,
+                EffortRate          = GetInt(row ,"EFFORT_RATE"),
             });
         }
 
