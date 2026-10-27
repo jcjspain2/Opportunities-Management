@@ -6,16 +6,17 @@ using Microsoft.IdentityModel.Tokens;
 using QUALITY_GATES.Models;
 using SqlDataLayer;
 using SqlDataLayer.Models;
-using static SqlDataLayer.SqlDbAccess;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using UtilidadesFichero;
 using static QUALITY_GATES.Tools.Static_Local_Functions;
+using static SqlDataLayer.SqlDbAccess;
 
 
 public partial class Class_Projects_Quality_Gates // Directr Query on BMS Database
@@ -30,13 +31,19 @@ public partial class Class_Projects_Quality_Gates // Directr Query on BMS Databa
     {
         var xxx = await Get_DMS_FilesPerproject(Opp_Line_ID);
     }
+  
+    /// <summary>
+    /// Gets all deliverables from DMS from a specific OPP Line ID
+    /// </summary>
+    /// <param name="Opp_Line_ID"></param>
+    /// <returns></returns>
     internal async Task<OperationResult<List<DELIVERABLE_FILE_FROM_DMS>>> Get_DMS_FilesPerproject(string Opp_Line_ID)
-        {
-        CancellationToken cancellationToken = default;
-        DELIVERABLE_FILE_FROM_DMS DMSFiles = new DELIVERABLE_FILE_FROM_DMS();
-        List<DELIVERABLE_FILE_FROM_DMS> CurList = new List<DELIVERABLE_FILE_FROM_DMS>();
-        var paramsFile = new[] { new SqlParameter("@oppLineId", Opp_Line_ID) };
-        var queryResult = await _dbDms.SelectAsync(SQL_FILES_PER_PROJECT_DMS(), paramsFile, cancellationToken);
+      {
+       CancellationToken cancellationToken = default;
+       DELIVERABLE_FILE_FROM_DMS DMSFiles = new DELIVERABLE_FILE_FROM_DMS();
+       List<DELIVERABLE_FILE_FROM_DMS> CurList = new List<DELIVERABLE_FILE_FROM_DMS>();
+       var paramsFile = new[] { new SqlParameter("@oppLineId", Opp_Line_ID) };
+       var queryResult = await _dbDms.SelectAsync(SQL_FILES_PER_PROJECT_DMS(), paramsFile, cancellationToken);
         if (!queryResult.Success || queryResult.DTResults == null)
             return OperationResult<List<DELIVERABLE_FILE_FROM_DMS>>.Fail($"Error: {queryResult.Message}");
         
@@ -81,7 +88,8 @@ public partial class Class_Projects_Quality_Gates // Directr Query on BMS Databa
 
     }
 
-     private string SQL_FILES_PER_PROJECT_DMS()
+  
+    private string SQL_FILES_PER_PROJECT_DMS()
     {
         return $@"
                 ;WITH ID_IN AS (
@@ -149,10 +157,18 @@ public partial class Class_Projects_Quality_Gates // Directr Query on BMS Databa
                      FOR FIELD_ID IN ([SGATE_ID], [OPP_LIN_ID], [STATUS_ID], [DELIV_ID])
                  ) AS Pvt;";
     }
-    public async Task<OperationResult<List<DELIVERABLE_FILE>>> Get_DMS_Files_Per_Deliverable(string Opp_Line_ID,
-                                                                                                        string GateId,
-                                                                                                        string StatusId,
-                                                                                                        string DelivId)
+    /// <summary>
+    /// Gets all files related with a deliverable
+    /// </summary>
+    /// <param name="Opp_Line_ID"></param>
+    /// <param name="GateId"></param>
+    /// <param name="StatusId"></param>
+    /// <param name="DelivId"></param>
+    /// <returns></returns>
+    internal async Task<OperationResult<List<DELIVERABLE_FILE>>> Get_DMS_Files_Per_Deliverable(string Opp_Line_ID,
+                                                                                             string GateId,
+                                                                                             string StatusId,
+                                                                                             string DelivId)
     {
         CancellationToken cancellationToken = default;
         DELIVERABLE_FILE DMSFiles = new DELIVERABLE_FILE();

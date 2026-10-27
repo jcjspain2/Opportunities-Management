@@ -20,6 +20,24 @@ using  QUALITY_GATES.Classes;
 namespace QUALITY_GATES.Classes;
 public partial class Class_Projects_Quality_Gates // Reader provide functions to display in UI current staus of projects and quality gates
 {
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="STATUS_ID"></param>
+    /// <param name="SGATE_ID"></param>
+    /// <param name="DELIVERABLE_ID"></param>
+    /// <returns></returns>
+    public async Task<OperationResult<StatusState>> Getxxxx(string STATUS_ID, string SGATE_ID, int DELIVERABLE_ID)
+    {
+        const string sql = @"SELECT OPP_LINE_ID,STATUS_ID,SGATE_ID,DELIVERABLE_ID
+                                   FROM dbo.TRA_PROJECTS_DELIVERABLES
+                                   WHERE STATUS_ID='PCA' AND SGATE_ID='PCA_1' AND DELIVERABLE_ID=10 AND
+                                         DELIVERABLE_STATUS_ID='COMPLETED' AND USER_TEXT=''";
+
+        return OperationResult<StatusState>.Fail($"Error:");
+
+        //TODO:End this function FOR MANAGING CLAUDE
+    }
 
     /// <summary>
     /// Get enumeration of a given status for understanding state of current status
