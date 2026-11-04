@@ -143,11 +143,11 @@ public partial class Class_Projects_Quality_Gates // Directr Query on BMS Databa
                             AND  TRIM(T1.FIELD_ID) + TRIM(T1.FIELD_VALUE) IN ('DELIV_ID' + @DelivID)
                            )
          
-                 SELECT TRANS_ID, FILE_ID,FLOW_ID, FILE_NAME, USER_UPLOAD,DATE_UPLOAD,FILE_TYPE_ID,FILE_LINK_LOCATION,
+                 SELECT TRANS_ID, FILE_ID,FLOW_ID, FILE_NAME, USER_UPLOAD,DATE_UPLOAD,FILE_TYPE_ID,FILE_LINK_LOCATION,FILE_UNIQ_ID,
                         [SGATE_ID], [OPP_LIN_ID], [STATUS_ID], [DELIV_ID]
                  FROM (
                      SELECT T1.TRANS_ID, T2.FILE_ID,T1.FLOW_ID, T1.FIELD_ID, T1.FIELD_VALUE,
-                            T2.FILE_NAME, T2.USER_UPLOAD,T2.DATE_UPLOAD,T2.FILE_TYPE_ID,T2.FILE_LINK_LOCATION
+                            T2.FILE_NAME, T2.USER_UPLOAD,T2.DATE_UPLOAD,T2.FILE_TYPE_ID,T2.FILE_LINK_LOCATION,T2.FILE_UNIQ_ID
                      FROM   [DMS].[dbo].[TRA_FLOW_FIELD_VALUES] T1
                      JOIN   DELIV_IN AS T3 ON T3.TRANS_ID = T1.TRANS_ID
                      JOIN   [DMS].[dbo].[TRA_FLOW_FIELD_FILES] T2 ON T2.TRANS_ID = T1.TRANS_ID
@@ -165,7 +165,7 @@ public partial class Class_Projects_Quality_Gates // Directr Query on BMS Databa
     /// <param name="StatusId"></param>
     /// <param name="DelivId"></param>
     /// <returns></returns>
-    internal async Task<OperationResult<List<DELIVERABLE_FILE>>> Get_DMS_Files_Per_Deliverable(string Opp_Line_ID,
+    public async Task<OperationResult<List<DELIVERABLE_FILE>>> Get_DMS_Files_Per_Deliverable(string Opp_Line_ID,
                                                                                              string GateId,
                                                                                              string StatusId,
                                                                                              string DelivId)
@@ -199,6 +199,7 @@ public partial class Class_Projects_Quality_Gates // Directr Query on BMS Databa
                     Id_File = GetInt(row, "FILE_ID"),
                     FileName = GetString(row, "FILE_NAME"),
                     FilePath = GetString(row, "FILE_LINK_LOCATION"),
+                    FileUniqueID= GetString(row, "FILE_UNIQ_ID"),
                     FileType = GetString(row, "FILE_TYPE_ID"),
                     UploadDate = GetDateTime(row, "DATE_UPLOAD"),
                     UserUpload = GetString(row, "USER_UPLOAD"),

@@ -14,7 +14,7 @@ using System.Data.SqlTypes;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
-using  UtilidadesFichero;
+using UtilidadesFichero;
 using static QUALITY_GATES.Tools.Static_Local_Functions;
 using  QUALITY_GATES.Classes;
 namespace QUALITY_GATES.Classes;
@@ -27,16 +27,69 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
     /// <param name="SGATE_ID"></param>
     /// <param name="DELIVERABLE_ID"></param>
     /// <returns></returns>
-    public async Task<OperationResult<StatusState>> Getxxxx(string STATUS_ID, string SGATE_ID, int DELIVERABLE_ID)
+    public async Task<OperationResult<List<PENDING_CIR>>> GetPendingCIR(CancellationToken cancellationToken = default)
     {
-        const string sql = @"SELECT OPP_LINE_ID,STATUS_ID,SGATE_ID,DELIVERABLE_ID
-                                   FROM dbo.TRA_PROJECTS_DELIVERABLES
-                                   WHERE STATUS_ID='PCA' AND SGATE_ID='PCA_1' AND DELIVERABLE_ID=10 AND
-                                         DELIVERABLE_STATUS_ID='COMPLETED' AND USER_TEXT=''";
+        const string sql = @"
+      SELECT a.OPP_LINE_ID, a.STATUS_ID, a.SGATE_ID, a.DELIVERABLE_ID,
+             b.OPPORTUNITY_NAME, b.OPPORTUNITY_LNE_NAME, b.MATNR, b.DESCRIPTION, b.PRODUCT_CATEGORY, b.PRODUCT_FAMILY,
+             a.DELIVERABLE_STATUS_ID, a.USER_TEXT
+      FROM dbo.TRA_PROJECTS_DELIVERABLES a
+      JOIN dbo.TRA_PROJECTS b ON b.OPPORTUNITY_LINE_ID = a.OPP_LINE_ID
+      WHERE a.STATUS_ID = 'PCA' AND a.SGATE_ID = 'PCA_1' AND a.DELIVERABLE_ID = '10'
+        AND a.DELIVERABLE_STATUS_ID = 'COMPLETED'
+        AND (a.USER_TEXT = '' OR a.USER_TEXT IS NULL) and IsAbandoned=0";
+        
+        var parameters = new[]
+        {
+            new SqlParameter("@StatusId", "PCA"),
+            new SqlParameter("@SGateId",  "PCA_1"),
+            new SqlParameter("@DelivId",  "10")
+        };
 
-        return OperationResult<StatusState>.Fail($"Error:");
+        var queryResult = await _db.SelectAsync(sql, parameters, cancellationToken);
+        if (!queryResult.Success || queryResult.DTResults == null)
+            return OperationResult<List<PENDING_CIR>>.Fail($"Error: {queryResult.Message}");
 
-        //TODO:End this function FOR MANAGING CLAUDE
+        try
+        {
+            var resultList = new List<PENDING_CIR>();
+            foreach (DataRow row in queryResult.DTResults.Rows)
+            {
+                string oppLineId = GetString(row, "OPP_LINE_ID");
+                string statusId = GetString(row, "STATUS_ID");
+                string sgateId = GetString(row, "SGATE_ID");
+                int delivId = GetInt(row, "DELIVERABLE_ID");
+
+                var filesResult = await Get_DMS_Files_Per_Deliverable(
+                    oppLineId, statusId, sgateId, delivId.ToString());
+
+                var files = filesResult.Success ? filesResult.Data ?? new List<DELIVERABLE_FILE>()
+                                                : new List<DELIVERABLE_FILE>();
+
+                resultList.Add(new PENDING_CIR
+                {
+                    OppLineId           = oppLineId,
+                    StatusId            = statusId,
+                    SGateId             = sgateId,
+                    DeliverableId       = delivId,
+                    OpportunityName     = GetString(row, "OPPORTUNITY_NAME"),
+                    OpportunityLineName = GetString(row, "OPPORTUNITY_LNE_NAME"),
+                    Matnr               = GetString(row, "MATNR"),
+                    Description         = GetString(row, "DESCRIPTION"),
+                    ProductCategory     = GetString(row, "PRODUCT_CATEGORY"),
+                    ProductFamily       = GetString(row, "PRODUCT_FAMILY"),
+                    DeliverableStatusId = GetString(row, "DELIVERABLE_STATUS_ID"),
+                    UserText            = GetString(row, "USER_TEXT"),
+                    HasFiles            = files.Count > 0,
+                    Files               = files
+                });
+            }
+            return OperationResult<List<PENDING_CIR>>.Ok(resultList);
+        }
+        catch (Exception ex)
+        {
+            return OperationResult<List<PENDING_CIR>>.Fail($"Error: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -222,7 +275,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                           T1.MODIFIED_DATE,T1.USER_TEXT,T1.NEXT_GATE_TRIGGERS,T1.PATH_TO_SAVE,T5.GATE_TEXT_EXPLANATION,T4.STATUS_DESCRIPTION,
                           T3.OPPORTUNITY_ID,ISNULL(T6.JOB_TITLE_DESCRIPTION,'') AS JOB_DESCRIP_RESP,ISNULL(T7.JOB_TITLE_DESCRIPTION,'') AS JOB_DESCRIP_ACC,
                           ISNULL(T8.GATE_STATUS_DESC,'') AS DEL_STATUS_DESC,ISNULL(T9.GATE_STATUS_DESC,'') AS ACC_STATUS_DESC,T3.Priority,T3.OPPORTUNITY_NAME,T3.OPPORTUNITY_LNE_NAME,
-                          T3.SALES_ORGANIZATION,T3.OWNER_SF,T3.PRODUCT_CATEGORY,T3.BUSINESS_UNIT,T10.RESP_COMMENT AS COMMENT
+                          T3.SALES_ORGANIZATION,T3.OWNER_SF,T3.PRODUCT_CATEGORY,T3.BUSINESS_UNIT,T10.RESP_COMMENT AS COMMENT,T3.[MATNR],T3.[DESCRIPTION]
                   FROM dbo.TRA_PROJECTS_DELIVERABLES T1
                   JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID=@ModuleId   AND T2.KEY_PROCESS='DEL_RESP' AND T2.GATE_STATUS_ID=T1.DELIVERABLE_STATUS_ID AND T2.IS_FINAL_STATE <> 1
                   JOIN dbo.TRA_PROJECTS T3 ON T3.OPPORTUNITY_LINE_ID=T1.OPP_LINE_ID
@@ -241,7 +294,7 @@ public partial class Class_Projects_Quality_Gates // Reader provide functions to
                           T1.MODIFIED_DATE,T1.USER_TEXT,T1.NEXT_GATE_TRIGGERS,T1.PATH_TO_SAVE,T5.GATE_TEXT_EXPLANATION,T4.STATUS_DESCRIPTION,
                           T3.OPPORTUNITY_ID,ISNULL(T6.JOB_TITLE_DESCRIPTION,'') AS JOB_DESCRIP_RESP,ISNULL(T7.JOB_TITLE_DESCRIPTION,'') AS JOB_DESCRIP_ACC,
                           ISNULL(T8.GATE_STATUS_DESC,'') AS DEL_STATUS_DESC,ISNULL(T9.GATE_STATUS_DESC,'') AS ACC_STATUS_DESC,T3.Priority,T3.OPPORTUNITY_NAME,T3.OPPORTUNITY_LNE_NAME,
-                          T3.SALES_ORGANIZATION,T3.OWNER_SF,T3.PRODUCT_CATEGORY,T3.BUSINESS_UNIT,T10.RESP_COMMENT AS COMMENT
+                          T3.SALES_ORGANIZATION,T3.OWNER_SF,T3.PRODUCT_CATEGORY,T3.BUSINESS_UNIT,T10.RESP_COMMENT AS COMMENT,T3.[MATNR],T3.[DESCRIPTION]
                   FROM dbo.TRA_PROJECTS_DELIVERABLES T1
                   JOIN dbo.MAS_GATE_STATUS T2 ON T2.MODULE_ID=@ModuleId   AND T2.KEY_PROCESS='DEL_RESP' AND T2.GATE_STATUS_ID=T1.DELIVERABLE_STATUS_ID AND T2.IS_FINAL_STATE <> 1
                   JOIN dbo.TRA_PROJECTS T3 ON T3.OPPORTUNITY_LINE_ID=T1.OPP_LINE_ID

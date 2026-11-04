@@ -265,6 +265,7 @@ public class DELIVERABLE_FILE
     public int Id_File { get; set; } = 0;
     public string FileName { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;
+    public string FileUniqueID { get; set; } = string.Empty;
     public string FileType { get; set; } = string.Empty;
     public string UserUpload { get; set; } = string.Empty;
     public DateTime UploadDate { get; set; }
@@ -293,6 +294,23 @@ internal class DELIVERABLE_FILE_FROM_DMS
     public string METADATA_User_Modification { get; set; } = string.Empty;
     public DateTime METADADATA_Creation_Date { get; set; } = DateTime.MinValue;
     public DateTime METADADATA_Modification_Date { get; set; } = DateTime.MinValue;
+}
+public class PENDING_CIR
+{
+    public string OppLineId           { get; set; } = string.Empty;
+    public string StatusId            { get; set; } = string.Empty;
+    public string SGateId             { get; set; } = string.Empty;
+    public int    DeliverableId       { get; set; } = 0;
+    public string OpportunityName     { get; set; } = string.Empty;
+    public string OpportunityLineName { get; set; } = string.Empty;
+    public string Matnr               { get; set; } = string.Empty;
+    public string Description         { get; set; } = string.Empty;
+    public string ProductCategory     { get; set; } = string.Empty;
+    public string ProductFamily       { get; set; } = string.Empty;
+    public string DeliverableStatusId { get; set; } = string.Empty;
+    public string UserText            { get; set; } = string.Empty;
+    public bool   HasFiles            { get; set; } = false;
+    public List<DELIVERABLE_FILE> Files { get; set; } = new();
 }
 public class USERS_DETAILS
 {
@@ -325,6 +343,9 @@ public class DeliverableAllocationRow
     public string DeliverableId { get; set; } = string.Empty;
     public string OpportunityName { get; set; } = string.Empty;
     public string DeliverableName { get; set; } = string.Empty;
+    public string MATNR { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+
     public string ResponsibleUserId { get; set; } = string.Empty;
     public string AccountableUserId { get; set; } = string.Empty;
     public string ResponsibleJobTitle { get; set; } = string.Empty;
@@ -390,13 +411,15 @@ public static class PriorityExtensions
 public class MEETING_HEADER
 {
     public string StatusId                { get; set; } = string.Empty;
-    public string StatusDescription { get; set; } = string.Empty;
+    public string StatusDescription       { get; set; } = string.Empty;
     public DateOnly MeetingDate           { get; set; } = DateOnly.MinValue;
     public string CurrentStatus           { get; set; } = string.Empty;
     public string MeetingTarget           { get; set; } = string.Empty;
     public string MeetingMinutes          { get; set; } = string.Empty;
     public string MeetingUserGen          { get; set; } = string.Empty;
     public DateTime MeetingDateGeneration { get; set; } = DateTime.MinValue;
+    public DateTime ClosingDate           { get; set; } = DateTime.MinValue;
+    public string ClosingUser             { get; set; } = string.Empty;
 }
 
 public class MEETING_USER
@@ -427,4 +450,15 @@ public class PROJECT_STATUS_PICKING_LIST
 {
     public string StatusId          { get; set; } = string.Empty;
     public string StatusDescription { get; set; } = string.Empty;
+}
+
+public class PROJECT_FOR_MEETING
+{
+    public string OppLineId     { get; set; } = string.Empty;
+    public string OppName       { get; set; } = string.Empty;
+    public string OppLineName   { get; set; } = string.Empty;
+    public string CustomerName  { get; set; } = string.Empty;
+    public string CurrentGateId { get; set; } = string.Empty;
+
+    public string DisplayName => string.IsNullOrWhiteSpace(OppLineName) ? OppLineId : $"{OppLineName} ({CustomerName})";
 }
