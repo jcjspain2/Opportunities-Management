@@ -457,6 +457,8 @@ public class PROJECT_FOR_MEETING
     public string OppLineId     { get; set; } = string.Empty;
     public string OppName       { get; set; } = string.Empty;
     public string OppLineName   { get; set; } = string.Empty;
+    public string MATNR { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
     public string CustomerName  { get; set; } = string.Empty;
     public string CurrentGateId { get; set; } = string.Empty;
 

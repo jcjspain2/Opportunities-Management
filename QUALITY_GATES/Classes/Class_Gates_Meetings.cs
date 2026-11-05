@@ -153,10 +153,11 @@ public partial class Class_Projects_Quality_Gates
         WHERE STATUS_ID = @StatusId AND MEETING_DATE = @MeetingDate";
 
     private string SQL_Select_Projects_In_Gate(string currentModule) => $@"
-        SELECT OPPORTUNITY_LINE_ID, OPPORTUNITY_NAME, OPPORTUNITY_LNE_NAME, CUST_NAME, CURRENT_QG_STATUS
-        FROM   dbo.TRA_PROJECTS
-        WHERE  {(currentModule == "Q_GATES_PR" ? "Is_Q_GATES_PR = 1 AND [IsGeneratedInitial_PR] = 1" : "Is_Q_GATES = 1 AND [IsGeneratedInitial] = 1")}
-          AND  CURRENT_QG_STATUS = @StatusId
+
+        SELECT a.OPPORTUNITY_LINE_ID, a.OPPORTUNITY_NAME, a.OPPORTUNITY_LNE_NAME, a.CUST_NAME,MATNR, DESCRIPTION
+        FROM   dbo.TRA_PROJECTS a
+        JOIN   dbo.TRA_PROJECTS_STATUS b on b.MODULE_ID= '{currentModule}' AND b.OPP_LINE_ID=a.OPPORTUNITY_LINE_ID AND b.STATUS_ID=@Status_Id
+        WHERE  {(currentModule == "Q_GATES_PR" ? "Is_Q_GATES_PR = 1 AND [IsGeneratedInitial_PR] = 1" : "Is_Q_GATES = 1 AND [IsGeneratedInitial] = 1")} AND IsAbandoned=0
         ORDER  BY OPPORTUNITY_LNE_NAME";
 
     private static string SQL_Insert_Meeting_Comment() => @"
@@ -930,16 +931,16 @@ public partial class Class_Projects_Quality_Gates
     /// Used in the meeting create dialog to populate the project picker.
     /// </summary>
     public async Task<OperationResult<List<PROJECT_FOR_MEETING>>> Get_Projects_In_Gate(
-        string STATUS_ID,
-        CancellationToken cancellationToken = default)
+                                                                                        string STATUS_ID,
+                                                                                        CancellationToken cancellationToken = default)
     {
         try
         {
             var queryResult = await _db.SelectAsync(
                 SQL_Select_Projects_In_Gate(_MODULE_ID),
-                new[] { new SqlParameter("@StatusId", STATUS_ID) },
+                new[] { new SqlParameter("@Status_Id", STATUS_ID) },
                 cancellationToken);
-
+            
             if (!queryResult.Success || queryResult.DTResults == null)
                 return OperationResult<List<PROJECT_FOR_MEETING>>.Fail($"Error: {queryResult.Message}");
 
@@ -951,7 +952,8 @@ public partial class Class_Projects_Quality_Gates
                     OppName        = GetString(row, "OPPORTUNITY_NAME"),
                     OppLineName    = GetString(row, "OPPORTUNITY_LNE_NAME"),
                     CustomerName   = GetString(row, "CUST_NAME"),
-                    CurrentGateId  = GetString(row, "CURRENT_QG_STATUS")
+                    MATNR          = GetString(row, "MATNR"),
+                    Description     = GetString(row, "DESCRIPTION")
                 });
 
             return OperationResult<List<PROJECT_FOR_MEETING>>.Ok(list);
