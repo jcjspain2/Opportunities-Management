@@ -49,5 +49,12 @@ namespace QUALITY_GATES.Tools
                 ? false
                 : Convert.ToBoolean(row[column]);
         }
+
+        public static decimal? GetDecimalNullable(DataRow row, string column)
+        {
+            return row[column] == DBNull.Value || row[column] == null
+                ? (decimal?)null
+                : Convert.ToDecimal(row[column]);
+        }
     }
 }
