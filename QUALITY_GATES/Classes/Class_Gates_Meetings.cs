@@ -533,15 +533,8 @@ public partial class Class_Projects_Quality_Gates
         if (currentStatus != "NOTSTARTED")
             return new SqlActionResult { Success = false, Message = "Only meetings in NOTSTARTED status can be edited." };
 
-        if (UserRequester != "System" && !string.Equals(organizer, UserRequester, StringComparison.OrdinalIgnoreCase))
+        if (UserRequester != "System" && !string.Equals(organizer.Trim(), UserRequester.Trim(), StringComparison.OrdinalIgnoreCase))
             return new SqlActionResult { Success = false, Message = "Only the meeting organizer can modify the meeting header." };
-
-        var dateParams = new[]
-        {
-            new SqlParameter("@NewDate",  NEW_MEETING_DATE),
-            new SqlParameter("@OldDate",  CURRENT_MEETING_DATE),
-            new SqlParameter("@StatusId", STATUS_ID)
-        };
 
         await using var conn = new SqlConnection(_db.ConnectionString);
         await conn.OpenAsync(cancellationToken);
@@ -549,14 +542,30 @@ public partial class Class_Projects_Quality_Gates
         try
         {
             // Update child tables first to satisfy FK constraints before changing the PK
-            var usersResult = await _db.NonQueryAsync(SQL_Update_Meeting_Header_Users_Date(), dateParams, tx, cancellationToken);
+            var usersResult = await _db.NonQueryAsync(
+                SQL_Update_Meeting_Header_Users_Date(),
+                new[]
+                {
+                    new SqlParameter("@NewDate",  NEW_MEETING_DATE),
+                    new SqlParameter("@OldDate",  CURRENT_MEETING_DATE),
+                    new SqlParameter("@StatusId", STATUS_ID)
+                },
+                tx, cancellationToken);
             if (!usersResult.Success)
             {
                 tx.Rollback();
                 return new SqlActionResult { Success = false, Message = $"Error updating attendees date: {usersResult.Message}" };
             }
 
-            var projResult = await _db.NonQueryAsync(SQL_Update_Meeting_Header_Projects_Date(), dateParams, tx, cancellationToken);
+            var projResult = await _db.NonQueryAsync(
+                SQL_Update_Meeting_Header_Projects_Date(),
+                new[]
+                {
+                    new SqlParameter("@NewDate",  NEW_MEETING_DATE),
+                    new SqlParameter("@OldDate",  CURRENT_MEETING_DATE),
+                    new SqlParameter("@StatusId", STATUS_ID)
+                },
+                tx, cancellationToken);
             if (!projResult.Success)
             {
                 tx.Rollback();
@@ -893,27 +902,27 @@ public partial class Class_Projects_Quality_Gates
         if (status != "NOTSTARTED")
             return new SqlActionResult { Success = false, Message = "Only meetings in NOTSTARTED status can be deleted." };
 
-        if (UserRequester != "System" && !string.Equals(organizer, UserRequester, StringComparison.OrdinalIgnoreCase))
+        if (UserRequester != "System" && !string.Equals(organizer.Trim(), UserRequester.Trim(), StringComparison.OrdinalIgnoreCase))
             return new SqlActionResult { Success = false, Message = "Only the meeting organizer can delete the meeting." };
-
-        var p = new[]
-        {
-            new SqlParameter("@StatusId",    STATUS_ID),
-            new SqlParameter("@MeetingDate", MEETING_DATE)
-        };
 
         await using var conn = new SqlConnection(_db.ConnectionString);
         await conn.OpenAsync(cancellationToken);
         await using var tx = conn.BeginTransaction();
         try
         {
-            var r1 = await _db.NonQueryAsync(SQL_Delete_Meeting_Projects_All(), p, tx, cancellationToken);
+            var r1 = await _db.NonQueryAsync(SQL_Delete_Meeting_Projects_All(),
+                new[] { new SqlParameter("@StatusId", STATUS_ID), new SqlParameter("@MeetingDate", MEETING_DATE) },
+                tx, cancellationToken);
             if (!r1.Success) { tx.Rollback(); return new SqlActionResult { Success = false, Message = r1.Message }; }
 
-            var r2 = await _db.NonQueryAsync(SQL_Delete_Meeting_Users_All(), p, tx, cancellationToken);
+            var r2 = await _db.NonQueryAsync(SQL_Delete_Meeting_Users_All(),
+                new[] { new SqlParameter("@StatusId", STATUS_ID), new SqlParameter("@MeetingDate", MEETING_DATE) },
+                tx, cancellationToken);
             if (!r2.Success) { tx.Rollback(); return new SqlActionResult { Success = false, Message = r2.Message }; }
 
-            var r3 = await _db.NonQueryAsync(SQL_Delete_Meeting_Header(), p, tx, cancellationToken);
+            var r3 = await _db.NonQueryAsync(SQL_Delete_Meeting_Header(),
+                new[] { new SqlParameter("@StatusId", STATUS_ID), new SqlParameter("@MeetingDate", MEETING_DATE) },
+                tx, cancellationToken);
             if (!r3.Success) { tx.Rollback(); return new SqlActionResult { Success = false, Message = r3.Message }; }
 
             tx.Commit();

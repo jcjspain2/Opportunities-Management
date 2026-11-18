@@ -12,83 +12,6 @@ namespace QUALITY_GATES.Classes;
 
 // ── Models — SPECS ─────────────────────────────────────────────────────────────────────
 
-public class SPEC_CATEGORY
-{
-    public string CatKey    { get; set; } = string.Empty;
-    public string CatName   { get; set; } = string.Empty;
-    public bool   IsDeleted { get; set; }
-}
-
-public class SPEC_FAMILY
-{
-    public string CatKey    { get; set; } = string.Empty;
-    public string FamKey    { get; set; } = string.Empty;
-    public string FamName   { get; set; } = string.Empty;
-    public bool   IsDeleted { get; set; }
-}
-
-public class SPEC_PARAMETER
-{
-    public string KeyParameter       { get; set; } = string.Empty;
-    public string ParameterName      { get; set; } = string.Empty;
-    public string ParameterDefaultUm { get; set; } = string.Empty;
-    public bool   IsDeleted          { get; set; }
-}
-
-public class SPEC_FAMILY_PARAMETER
-{
-    public string FamKey        { get; set; } = string.Empty;
-    public string KeyParameter  { get; set; } = string.Empty;
-    public string ParameterName { get; set; } = string.Empty;
-    public string DefaultUm     { get; set; } = string.Empty;
-    public string TypeParameter { get; set; } = string.Empty; // M=Mandatory / O=Optional / I=Informative
-    public bool   IsDeleted     { get; set; }
-}
-
-public class SPEC_UNIT
-{
-    public string UmCode        { get; set; } = string.Empty;
-    public string UmDescription { get; set; } = string.Empty;
-}
-
-public class SPEC_MATNR_HEADER
-{
-    public string   Matnr           { get; set; } = string.Empty;
-    public string   Edition         { get; set; } = string.Empty;
-    public string   Description     { get; set; } = string.Empty;
-    public string   ProductCategory { get; set; } = string.Empty; // → PRODUCT_CATEGOTY (typo in DB, correct here)
-    public string   ProductFamily   { get; set; } = string.Empty;
-    public string   SpecFilePath    { get; set; } = string.Empty;
-    public DateOnly IssueDate       { get; set; } = DateOnly.MinValue;
-    public string   CreatedBy       { get; set; } = string.Empty;
-    public DateTime CreatedDate     { get; set; } = DateTime.MinValue;
-    public bool     IsDeleted       { get; set; }
-}
-
-public class SPEC_MATNR_PARAMETER
-{
-    public string   Matnr         { get; set; } = string.Empty;
-    public string   Edition       { get; set; } = string.Empty;
-    public string   KeyParameter  { get; set; } = string.Empty;
-    public string   ParameterName { get; set; } = string.Empty;
-    public string   TypeParameter { get; set; } = string.Empty; // M / O / I — joined from MAS_SPEC_FAMILY_VS_PARAMETER
-    public decimal? ValueMax      { get; set; }
-    public decimal? ValueTyp      { get; set; }
-    public decimal? ValueMin      { get; set; }
-    public string?  ValueText     { get; set; }
-    public string   Um            { get; set; } = string.Empty;
-    public string   DefaultUm     { get; set; } = string.Empty;
-    public string   ModifiedBy    { get; set; } = string.Empty;
-    public DateTime ModifiedDate  { get; set; } = DateTime.MinValue;
-    public bool     IsDeleted     { get; set; }
-}
-
-public class SPEC_MATNR_DETAIL
-{
-    public SPEC_MATNR_HEADER          Header     { get; set; } = new();
-    public List<SPEC_MATNR_PARAMETER> Parameters { get; set; } = [];
-}
-
 /// <summary>One parameter criterion in a parametric search: VALUE_TYP must fall in [ValueTypMin, ValueTypMax] (either bound optional).</summary>
 public class SPEC_PARAM_FILTER
 {
@@ -104,25 +27,15 @@ public class SPEC_SEARCH_RESULT
     public List<SPEC_MATNR_PARAMETER> Parameters { get; set; } = [];
 }
 
-/// <summary>One parameter value to set in a batch update operation.</summary>
-public class SPEC_PARAM_UPDATE
-{
-    public string   KeyParameter { get; set; } = string.Empty;
-    public decimal? ValueMax     { get; set; }
-    public decimal? ValueTyp     { get; set; }
-    public decimal? ValueMin     { get; set; }
-    public string?  ValueText    { get; set; }
-    public string?  Um           { get; set; }
-}
-
 /// <summary>Result returned by Specs_ImportFromJson.</summary>
 public class SPEC_IMPORT_RESULT
 {
     public string       Matnr               { get; set; } = string.Empty;
     public string       Edition             { get; set; } = string.Empty;
     public bool         HeaderCreated       { get; set; }  // true=INSERT, false=UPDATE
-    public int          ParametersUpdated   { get; set; }
-    public int          ParametersSkipped   { get; set; }  // in JSON but not found in DB for this MATNR
+    public int          ParametersUpdated   { get; set; }  // rows really written (value changed)
+    public int          ParametersSkipped   { get; set; }  // in JSON but not an active parameter of this MATNR, or invalid
+    public int          ParametersProtected { get; set; }  // DATA_SOURCE='MANUAL' — import value ignored
     public List<string> Warnings            { get; set; } = [];
 }
 
@@ -157,21 +70,11 @@ public partial class Class_Projects_Quality_Gates
     // MODULE_ID used in MAS_JOB_TITLES_RESTRICTIONS for all SPECS operations
     private const string SPECS_MODULE_ID = "SPECS";
 
-    // ── Private helpers ───────────────────────────────────────────────────────
+    // Single key process in MAS_JOB_TITLES_RESTRICTIONS for EVERY SPECS write
+    // (catalog maintenance, product create / edit / delete, parameter values). "System" bypasses.
+    private const string SPECS_KEY_PROCESS = "@SPECS";
 
-    private static SPEC_MATNR_HEADER MapSpecHeaderRow(DataRow row) => new()
-    {
-        Matnr           = GetString(row, "MATNR"),
-        Edition         = GetString(row, "EDITION"),
-        Description     = GetString(row, "DESCRIPTION"),
-        ProductCategory = GetString(row, "PRODUCT_CATEGOTY"),
-        ProductFamily   = GetString(row, "PRODUCT_FAMILY"),
-        SpecFilePath    = GetString(row, "SPEC_FILE_PATH"),
-        IssueDate       = GetDateOnly(row, "ISSUE_DATE"),
-        CreatedBy       = GetString(row, "CREATED_BY"),
-        CreatedDate     = GetDateTime(row, "CREATED_DATE"),
-        IsDeleted       = GetBoolean(row, "IS_DELETED")
-    };
+    // ── Private helpers ───────────────────────────────────────────────────────
 
     // Sets SESSION_CONTEXT('CurrentUser') so MATNR audit triggers record who made the change.
     // Must be called inside a transaction before any UPDATE/DELETE on MATNR tables.
@@ -231,289 +134,6 @@ public partial class Class_Projects_Quality_Gates
                 $"is not authorized for '{keyProcess}'. Allowed: {string.Join(", ", authorized)}.");
 
         return OperationResult<bool>.Ok(true);
-    }
-
-    // ── Read — Catalog ────────────────────────────────────────────────────────
-
-    public async Task<OperationResult<List<SPEC_CATEGORY>>> Specs_GetCategories(
-        CancellationToken cancellationToken = default)
-    {
-        const string sql = @"
-            SELECT CAT_KEY, CAT_NAME, IS_DELETED
-            FROM   dbo.MAS_SPEC_CATEGORY
-            WHERE  IS_DELETED = 0
-            ORDER BY CAT_NAME";
-
-        var q = await _db.SelectAsync(sql, null, cancellationToken);
-        if (!q.Success || q.DTResults == null)
-            return OperationResult<List<SPEC_CATEGORY>>.Fail($"Error: {q.Message}");
-
-        var list = new List<SPEC_CATEGORY>();
-        foreach (DataRow row in q.DTResults.Rows)
-            list.Add(new SPEC_CATEGORY
-            {
-                CatKey    = GetString(row, "CAT_KEY"),
-                CatName   = GetString(row, "CAT_NAME"),
-                IsDeleted = GetBoolean(row, "IS_DELETED")
-            });
-
-        return OperationResult<List<SPEC_CATEGORY>>.Ok(list);
-    }
-
-    /// <summary>
-    /// Returns families. Pass catKey to filter by category; omit (or null) to get all.
-    /// </summary>
-    public async Task<OperationResult<List<SPEC_FAMILY>>> Specs_GetFamilies(
-        string? catKey = null,
-        CancellationToken cancellationToken = default)
-    {
-        string sql = @"
-            SELECT CAT_KEY, FAM_KEY, FAM_NAME, IS_DELETED
-            FROM   dbo.MAS_SPEC_FAMILY
-            WHERE  IS_DELETED = 0";
-
-        SqlParameter[]? parameters = null;
-        if (!string.IsNullOrWhiteSpace(catKey))
-        {
-            sql += " AND CAT_KEY = @catKey";
-            parameters = new[] { new SqlParameter("@catKey", catKey) };
-        }
-        sql += " ORDER BY FAM_NAME";
-
-        var q = await _db.SelectAsync(sql, parameters, cancellationToken);
-        if (!q.Success || q.DTResults == null)
-            return OperationResult<List<SPEC_FAMILY>>.Fail($"Error: {q.Message}");
-
-        var list = new List<SPEC_FAMILY>();
-        foreach (DataRow row in q.DTResults.Rows)
-            list.Add(new SPEC_FAMILY
-            {
-                CatKey    = GetString(row, "CAT_KEY"),
-                FamKey    = GetString(row, "FAM_KEY"),
-                FamName   = GetString(row, "FAM_NAME"),
-                IsDeleted = GetBoolean(row, "IS_DELETED")
-            });
-
-        return OperationResult<List<SPEC_FAMILY>>.Ok(list);
-    }
-
-    /// <summary>
-    /// Returns the parameter list for a family, joined with names and type (M/O/I).
-    /// Set includeDeleted=true to also return soft-deleted rows (needed for catalog management).
-    /// </summary>
-    public async Task<OperationResult<List<SPEC_FAMILY_PARAMETER>>> Specs_GetFamilyParameters(
-        string famKey,
-        bool includeDeleted = false,
-        CancellationToken cancellationToken = default)
-    {
-        string sql = @"
-            SELECT fvp.FAM_KEY, fvp.KEY_PARAMETER, fvp.TYPE_PARAMETER, fvp.IS_DELETED,
-                   p.PARAMETER_NAME, p.PARAMETER_DEFAULT_UM
-            FROM   dbo.MAS_SPEC_FAMILY_VS_PARAMETER fvp
-            JOIN   dbo.MAS_SPEC_PARAMETER p ON p.KEY_PARAMETER = fvp.KEY_PARAMETER
-            WHERE  fvp.FAM_KEY = @famKey";
-
-        if (!includeDeleted) sql += " AND fvp.IS_DELETED = 0";
-        sql += " ORDER BY fvp.TYPE_PARAMETER, p.PARAMETER_NAME";
-
-        var q = await _db.SelectAsync(sql, new[] { new SqlParameter("@famKey", famKey) }, cancellationToken);
-        if (!q.Success || q.DTResults == null)
-            return OperationResult<List<SPEC_FAMILY_PARAMETER>>.Fail($"Error: {q.Message}");
-
-        var list = new List<SPEC_FAMILY_PARAMETER>();
-        foreach (DataRow row in q.DTResults.Rows)
-            list.Add(new SPEC_FAMILY_PARAMETER
-            {
-                FamKey        = GetString(row, "FAM_KEY"),
-                KeyParameter  = GetString(row, "KEY_PARAMETER"),
-                ParameterName = GetString(row, "PARAMETER_NAME"),
-                DefaultUm     = GetString(row, "PARAMETER_DEFAULT_UM"),
-                TypeParameter = GetString(row, "TYPE_PARAMETER"),
-                IsDeleted     = GetBoolean(row, "IS_DELETED")
-            });
-
-        return OperationResult<List<SPEC_FAMILY_PARAMETER>>.Ok(list);
-    }
-
-    /// <summary>
-    /// Returns the master parameter catalog. Used when adding a new family×parameter link.
-    /// Set includeDeleted=true for catalog management screens.
-    /// </summary>
-    public async Task<OperationResult<List<SPEC_PARAMETER>>> Specs_GetMasterParameters(
-        bool includeDeleted = false,
-        CancellationToken cancellationToken = default)
-    {
-        string sql = @"
-            SELECT KEY_PARAMETER, PARAMETER_NAME, PARAMETER_DEFAULT_UM, IS_DELETED
-            FROM   dbo.MAS_SPEC_PARAMETER";
-
-        if (!includeDeleted) sql += " WHERE IS_DELETED = 0";
-        sql += " ORDER BY PARAMETER_NAME";
-
-        var q = await _db.SelectAsync(sql, null, cancellationToken);
-        if (!q.Success || q.DTResults == null)
-            return OperationResult<List<SPEC_PARAMETER>>.Fail($"Error: {q.Message}");
-
-        var list = new List<SPEC_PARAMETER>();
-        foreach (DataRow row in q.DTResults.Rows)
-            list.Add(new SPEC_PARAMETER
-            {
-                KeyParameter       = GetString(row, "KEY_PARAMETER"),
-                ParameterName      = GetString(row, "PARAMETER_NAME"),
-                ParameterDefaultUm = GetString(row, "PARAMETER_DEFAULT_UM"),
-                IsDeleted          = GetBoolean(row, "IS_DELETED")
-            });
-
-        return OperationResult<List<SPEC_PARAMETER>>.Ok(list);
-    }
-
-    /// <summary>
-    /// Returns the unit of measure catalog.
-    /// Set includeDeleted=true for catalog management screens.
-    /// </summary>
-    public async Task<OperationResult<List<SPEC_UNIT>>> Specs_GetUnits(
-        CancellationToken cancellationToken = default)
-    {
-        const string sql = @"
-            SELECT UM_CODE, UM_DESCRIPTION
-            FROM   dbo.MAS_SPEC_UM
-            ORDER BY UM_CODE";
-
-        var q = await _db.SelectAsync(sql, null, cancellationToken);
-        if (!q.Success || q.DTResults == null)
-            return OperationResult<List<SPEC_UNIT>>.Fail($"Error: {q.Message}");
-
-        var list = new List<SPEC_UNIT>();
-        foreach (DataRow row in q.DTResults.Rows)
-            list.Add(new SPEC_UNIT
-            {
-                UmCode        = GetString(row, "UM_CODE"),
-                UmDescription = GetString(row, "UM_DESCRIPTION")
-            });
-
-        return OperationResult<List<SPEC_UNIT>>.Ok(list);
-    }
-
-    // ── Read — Products ───────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Returns the product header list. Both filters are optional.
-    /// </summary>
-    public async Task<OperationResult<List<SPEC_MATNR_HEADER>>> Specs_GetProductList(
-        string? catKey = null,
-        string? famKey = null,
-        CancellationToken cancellationToken = default)
-    {
-        string sql = @"
-            SELECT MATNR, EDITION, DESCRIPTION, PRODUCT_CATEGOTY, PRODUCT_FAMILY,
-                   SPEC_FILE_PATH, ISSUE_DATE, CREATED_BY, CREATED_DATE, IS_DELETED
-            FROM   dbo.MAS_SPEC_MATNR_HEADER
-            WHERE  IS_DELETED = 0";
-
-        var paramList = new List<SqlParameter>();
-        if (!string.IsNullOrWhiteSpace(catKey))
-        {
-            sql += " AND PRODUCT_CATEGOTY = @catKey";
-            paramList.Add(new SqlParameter("@catKey", catKey));
-        }
-        if (!string.IsNullOrWhiteSpace(famKey))
-        {
-            sql += " AND PRODUCT_FAMILY = @famKey";
-            paramList.Add(new SqlParameter("@famKey", famKey));
-        }
-        sql += " ORDER BY MATNR, EDITION";
-
-        var q = await _db.SelectAsync(sql, paramList.Count > 0 ? [.. paramList] : null, cancellationToken);
-        if (!q.Success || q.DTResults == null)
-            return OperationResult<List<SPEC_MATNR_HEADER>>.Fail($"Error: {q.Message}");
-
-        var list = new List<SPEC_MATNR_HEADER>();
-        foreach (DataRow row in q.DTResults.Rows)
-            list.Add(MapSpecHeaderRow(row));
-
-        return OperationResult<List<SPEC_MATNR_HEADER>>.Ok(list);
-    }
-
-    /// <summary>
-    /// Returns full product detail: header + all active parameters with type and default UM joined.
-    /// Parameters are ordered Mandatory → Optional → Informative, then alphabetically.
-    /// </summary>
-    public async Task<OperationResult<SPEC_MATNR_DETAIL>> Specs_GetProductDetail(
-        string matnr,
-        string edition,
-        CancellationToken cancellationToken = default)
-    {
-        const string sqlHeader = @"
-            SELECT MATNR, EDITION, DESCRIPTION, PRODUCT_CATEGOTY, PRODUCT_FAMILY,
-                   SPEC_FILE_PATH, ISSUE_DATE, CREATED_BY, CREATED_DATE, IS_DELETED
-            FROM   dbo.MAS_SPEC_MATNR_HEADER
-            WHERE  MATNR = @matnr AND EDITION = @edition";
-
-        var keyParams = new[]
-        {
-            new SqlParameter("@matnr",   matnr),
-            new SqlParameter("@edition", edition)
-        };
-
-        var hq = await _db.SelectAsync(sqlHeader, keyParams, cancellationToken);
-        if (!hq.Success || hq.DTResults == null)
-            return OperationResult<SPEC_MATNR_DETAIL>.Fail($"Error: {hq.Message}");
-        if (hq.DTResults.Rows.Count == 0)
-            return OperationResult<SPEC_MATNR_DETAIL>.Fail($"Product '{matnr}/{edition}' not found.");
-
-        var header = MapSpecHeaderRow(hq.DTResults.Rows[0]);
-
-        const string sqlParams = @"
-            SELECT p.MATNR, p.EDITION, p.KEY_PARAMETER,
-                   p.VALUE_MAX, p.VALUE_TYP, p.VALUE_MIN, p.VALUE_TEXT,
-                   p.UM, p.MODIFIED_BY, p.MODIFIED_DATE, p.IS_DELETED,
-                   mp.PARAMETER_NAME, mp.PARAMETER_DEFAULT_UM,
-                   fvp.TYPE_PARAMETER
-            FROM   dbo.MAS_SPEC_MATNR_PARAMETERS p
-            JOIN   dbo.MAS_SPEC_PARAMETER mp
-                     ON mp.KEY_PARAMETER = p.KEY_PARAMETER
-            JOIN   dbo.MAS_SPEC_FAMILY_VS_PARAMETER fvp
-                     ON fvp.FAM_KEY = @famKey AND fvp.KEY_PARAMETER = p.KEY_PARAMETER
-            WHERE  p.MATNR = @matnr AND p.EDITION = @edition AND p.IS_DELETED = 0
-            ORDER BY fvp.TYPE_PARAMETER, mp.PARAMETER_NAME";
-
-        var pq = await _db.SelectAsync(sqlParams,
-            new[]
-            {
-                new SqlParameter("@matnr",   matnr),
-                new SqlParameter("@edition", edition),
-                new SqlParameter("@famKey",  header.ProductFamily)
-            },
-            cancellationToken);
-
-        if (!pq.Success || pq.DTResults == null)
-            return OperationResult<SPEC_MATNR_DETAIL>.Fail($"Error loading parameters: {pq.Message}");
-
-        var paramList = new List<SPEC_MATNR_PARAMETER>();
-        foreach (DataRow row in pq.DTResults.Rows)
-            paramList.Add(new SPEC_MATNR_PARAMETER
-            {
-                Matnr         = GetString(row, "MATNR"),
-                Edition       = GetString(row, "EDITION"),
-                KeyParameter  = GetString(row, "KEY_PARAMETER"),
-                ParameterName = GetString(row, "PARAMETER_NAME"),
-                TypeParameter = GetString(row, "TYPE_PARAMETER"),
-                ValueMax      = GetDecimalNullable(row, "VALUE_MAX"),
-                ValueTyp      = GetDecimalNullable(row, "VALUE_TYP"),
-                ValueMin      = GetDecimalNullable(row, "VALUE_MIN"),
-                ValueText     = GetString(row, "VALUE_TEXT"),
-                Um            = GetString(row, "UM"),
-                DefaultUm     = GetString(row, "PARAMETER_DEFAULT_UM"),
-                ModifiedBy    = GetString(row, "MODIFIED_BY"),
-                ModifiedDate  = GetDateTime(row, "MODIFIED_DATE"),
-                IsDeleted     = GetBoolean(row, "IS_DELETED")
-            });
-
-        return OperationResult<SPEC_MATNR_DETAIL>.Ok(new SPEC_MATNR_DETAIL
-        {
-            Header     = header,
-            Parameters = paramList
-        });
     }
 
     /// <summary>
@@ -638,30 +258,10 @@ public partial class Class_Projects_Quality_Gates
         return OperationResult<List<SPEC_SEARCH_RESULT>>.Ok(resultList);
     }
 
-    /// <summary>
-    /// Returns true if userId holds the SPECS_EDIT permission.
-    /// Call from UI to decide whether to show edit controls before attempting a save.
-    /// </summary>
-    public async Task<bool> Specs_CanUserEdit(
-        string userId,
-        CancellationToken cancellationToken = default)
-    {
-        var result = await Specs_CheckPermission("SPECS_EDIT", userId, cancellationToken);
-        return result.Success;
-    }
-
-    public async Task<bool> Specs_CanCreate(
-        string userId,
-        CancellationToken cancellationToken = default)
-    {
-        var result = await Specs_CheckPermission("SPECS_CRT", userId, cancellationToken);
-        return result.Success;
-    }
-
     // ── Write — Products ──────────────────────────────────────────────────────
 
     /// <summary>
-    /// Creates a new product header. Requires SPECS_CREATE permission.
+    /// Creates a new product header. Requires @SPECS permission.
     /// Triggers auto-populate parameters (TR_MATNR_HDR_INIT_PARAMS) and audit (TR_MATNR_HDR_AUDIT).
     /// </summary>
     public async Task<SqlActionResult> Specs_CreateProduct(
@@ -669,7 +269,7 @@ public partial class Class_Projects_Quality_Gates
                                                             string userRequester = "System",
                                                             CancellationToken cancellationToken = default)
     {
-        var perm = await Specs_CheckPermission("SPECS_CRT", userRequester, cancellationToken);
+        var perm = await Specs_CheckPermission(SPECS_KEY_PROCESS, userRequester, cancellationToken);
         if (!perm.Success)
             return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
 
@@ -698,511 +298,6 @@ public partial class Class_Projects_Quality_Gates
             });
     }
 
-    /// <summary>
-    /// Updates the editable fields of a product header (description, file path, issue date).
-    /// Requires SPECS_EDIT permission. TR_MATNR_HDR_AUDIT records the change.
-    /// </summary>
-    public async Task<SqlActionResult> Specs_UpdateProductHeader(
-        string matnr,
-        string edition,
-        string description,
-        string? specFilePath,
-        DateOnly? issueDate,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_EDIT", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.ExecuteInTransactionAsync(async (tx, ct) =>
-        {
-            await Specs_SetSessionUserAsync(userRequester, tx, ct);
-
-            const string sql = @"
-                UPDATE dbo.MAS_SPEC_MATNR_HEADER
-                SET DESCRIPTION    = @description,
-                    SPEC_FILE_PATH = @filePath,
-                    ISSUE_DATE     = @issueDate
-                WHERE MATNR = @matnr AND EDITION = @edition";
-
-            await _db.NonQueryAsync(sql,
-                new[]
-                {
-                    new SqlParameter("@matnr",       matnr),
-                    new SqlParameter("@edition",     edition),
-                    new SqlParameter("@description", description),
-                    new SqlParameter("@filePath",    string.IsNullOrWhiteSpace(specFilePath)
-                                                         ? (object)DBNull.Value : specFilePath),
-                    new SqlParameter("@issueDate",   issueDate == null || issueDate == DateOnly.MinValue
-                                                         ? (object)DBNull.Value
-                                                         : issueDate.Value.ToDateTime(TimeOnly.MinValue))
-                },
-                transaction: tx,
-                ct: ct);
-        }, cancellationToken);
-    }
-
-    /// <summary>
-    /// Updates the values and UM of a single parameter line. Requires SPECS_EDIT permission.
-    /// Pass null for any value to clear it. Pass null/empty for um to keep the family default.
-    /// TR_MATNR_PRM_AUDIT records old → new automatically.
-    /// </summary>
-    public async Task<SqlActionResult> Specs_UpdateParameterValue(
-        string matnr,
-        string edition,
-        string keyParameter,
-        decimal? valueMax,
-        decimal? valueTyp,
-        decimal? valueMin,
-        string? valueText,
-        string? um,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_EDIT", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.ExecuteInTransactionAsync(async (tx, ct) =>
-        {
-            await Specs_SetSessionUserAsync(userRequester, tx, ct);
-
-            const string sql = @"
-                UPDATE dbo.MAS_SPEC_MATNR_PARAMETERS
-                SET VALUE_MAX     = @valueMax,
-                    VALUE_TYP     = @valueTyp,
-                    VALUE_MIN     = @valueMin,
-                    VALUE_TEXT    = @valueText,
-                    UM            = COALESCE(NULLIF(@um, ''), UM),
-                    MODIFIED_BY   = @user,
-                    MODIFIED_DATE = GETDATE()
-                WHERE MATNR = @matnr AND EDITION = @edition AND KEY_PARAMETER = @keyParameter";
-
-            await _db.NonQueryAsync(sql,
-                new[]
-                {
-                    new SqlParameter("@matnr",        matnr),
-                    new SqlParameter("@edition",      edition),
-                    new SqlParameter("@keyParameter", keyParameter),
-                    new SqlParameter("@valueMax",     (object?)valueMax ?? DBNull.Value),
-                    new SqlParameter("@valueTyp",     (object?)valueTyp ?? DBNull.Value),
-                    new SqlParameter("@valueMin",     (object?)valueMin ?? DBNull.Value),
-                    new SqlParameter("@valueText",    string.IsNullOrWhiteSpace(valueText) ? (object)DBNull.Value : valueText),
-                    new SqlParameter("@um",           string.IsNullOrWhiteSpace(um) ? (object)DBNull.Value : um),
-                    new SqlParameter("@user",         userRequester)
-                },
-                transaction: tx,
-                ct: ct);
-        }, cancellationToken);
-    }
-
-    /// <summary>
-    /// Updates multiple parameter values in a single transaction. Requires SPECS_EDIT permission.
-    /// Only the parameters present in the updates list are modified; the rest remain unchanged.
-    /// TR_MATNR_PRM_AUDIT records old → new for each line automatically.
-    /// </summary>
-    public async Task<SqlActionResult> Specs_UpdateParametersBatch(
-                                                                    string matnr,
-                                                                    string edition,
-                                                                    List<SPEC_PARAM_UPDATE> updates,
-                                                                    string userRequester = "System",
-                                                                    CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_EDIT", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        if (updates == null || updates.Count == 0)
-            return new SqlActionResult { Success = true, Message = "OK", RecordsAffected = 0 };
-
-        return await _db.ExecuteInTransactionAsync(async (tx, ct) =>
-        {
-            await Specs_SetSessionUserAsync(userRequester, tx, ct);
-
-            const string sql = @"
-                UPDATE dbo.MAS_SPEC_MATNR_PARAMETERS
-                SET VALUE_MAX     = @valueMax,
-                    VALUE_TYP     = @valueTyp,
-                    VALUE_MIN     = @valueMin,
-                    VALUE_TEXT    = @valueText,
-                    UM            = COALESCE(NULLIF(@um, ''), UM),
-                    MODIFIED_BY   = @user,
-                    MODIFIED_DATE = GETDATE()
-                WHERE MATNR = @matnr AND EDITION = @edition AND KEY_PARAMETER = @keyParameter";
-
-            foreach (var upd in updates)
-            {
-                await _db.NonQueryAsync(sql,
-                    new[]
-                    {
-                        new SqlParameter("@matnr",        matnr),
-                        new SqlParameter("@edition",      edition),
-                        new SqlParameter("@keyParameter", upd.KeyParameter),
-                        new SqlParameter("@valueMax",     (object?)upd.ValueMax ?? DBNull.Value),
-                        new SqlParameter("@valueTyp",     (object?)upd.ValueTyp ?? DBNull.Value),
-                        new SqlParameter("@valueMin",     (object?)upd.ValueMin ?? DBNull.Value),
-                        new SqlParameter("@valueText",    string.IsNullOrWhiteSpace(upd.ValueText) ? (object)DBNull.Value : upd.ValueText),
-                        new SqlParameter("@um",           string.IsNullOrWhiteSpace(upd.Um) ? (object)DBNull.Value : upd.Um),
-                        new SqlParameter("@user",         userRequester)
-                    },
-                    transaction: tx,
-                    ct: ct);
-            }
-        }, cancellationToken);
-    }
-
-    /// <summary>
-    /// Soft-deletes a product (IS_DELETED = 1). Requires SPECS_DELETE permission.
-    /// TR_MATNR_HDR_AUDIT logs the operation.
-    /// </summary>
-    public async Task<SqlActionResult> Specs_DeleteProduct(
-        string matnr,
-        string edition,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_DEL", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.ExecuteInTransactionAsync(async (tx, ct) =>
-        {
-            await Specs_SetSessionUserAsync(userRequester, tx, ct);
-
-            const string sql = @"
-                UPDATE dbo.MAS_SPEC_MATNR_HEADER
-                SET IS_DELETED = 1
-                WHERE MATNR = @matnr AND EDITION = @edition";
-
-            await _db.NonQueryAsync(sql,
-                new[]
-                {
-                    new SqlParameter("@matnr",   matnr),
-                    new SqlParameter("@edition", edition)
-                },
-                transaction: tx,
-                ct: ct);
-        }, cancellationToken);
-    }
-
-    // ── Write — Catalog: Categories ───────────────────────────────────────────
-
-    public async Task<SqlActionResult> Specs_AddCategory(
-        string catKey,
-        string catName,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_CAT", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.NonQueryAsync(
-            "INSERT INTO dbo.MAS_SPEC_CATEGORY (CAT_KEY, CAT_NAME, IS_DELETED) VALUES (@key, @name, 0)",
-            new[]
-            {
-                new SqlParameter("@key",  catKey),
-                new SqlParameter("@name", catName)
-            });
-    }
-
-    public async Task<SqlActionResult> Specs_UpdateCategory(
-        string catKey,
-        string catName,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_CAT", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.NonQueryAsync(
-            "UPDATE dbo.MAS_SPEC_CATEGORY SET CAT_NAME = @name WHERE CAT_KEY = @key",
-            new[]
-            {
-                new SqlParameter("@key",  catKey),
-                new SqlParameter("@name", catName)
-            });
-    }
-
-    public async Task<SqlActionResult> Specs_DisableCategory(
-        string catKey,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_CAT", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.NonQueryAsync(
-            "UPDATE dbo.MAS_SPEC_CATEGORY SET IS_DELETED = 1 WHERE CAT_KEY = @key",
-            new[] { new SqlParameter("@key", catKey) });
-    }
-
-    // ── Write — Catalog: Families ─────────────────────────────────────────────
-
-    public async Task<SqlActionResult> Specs_AddFamily(
-        string catKey,
-        string famKey,
-        string famName,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        //var perm = await Specs_CheckPermission("SPECS_CAT", userRequester, cancellationToken);
-        //if (!perm.Success)
-        //    return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.NonQueryAsync(
-            "INSERT INTO dbo.MAS_SPEC_FAMILY (CAT_KEY, FAM_KEY, FAM_NAME, IS_DELETED) VALUES (@catKey, @famKey, @name, 0)",
-            new[]
-            {
-                new SqlParameter("@catKey", catKey),
-                new SqlParameter("@famKey", famKey),
-                new SqlParameter("@name",   famName)
-            });
-    }
-
-    public async Task<SqlActionResult> Specs_UpdateFamily(
-        string catKey,
-        string famKey,
-        string famName,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_CAT", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.NonQueryAsync(
-            "UPDATE dbo.MAS_SPEC_FAMILY SET FAM_NAME = @name WHERE CAT_KEY = @catKey AND FAM_KEY = @famKey",
-            new[]
-            {
-                new SqlParameter("@catKey", catKey),
-                new SqlParameter("@famKey", famKey),
-                new SqlParameter("@name",   famName)
-            });
-    }
-
-    public async Task<SqlActionResult> Specs_DisableFamily(
-        string catKey,
-        string famKey,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_CAT", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.NonQueryAsync(
-            "UPDATE dbo.MAS_SPEC_FAMILY SET IS_DELETED = 1 WHERE CAT_KEY = @catKey AND FAM_KEY = @famKey",
-            new[]
-            {
-                new SqlParameter("@catKey", catKey),
-                new SqlParameter("@famKey", famKey)
-            });
-    }
-
-    // ── Write — Catalog: Master Parameters ───────────────────────────────────
-
-    public async Task<SqlActionResult> Specs_AddMasterParameter(
-        string keyParameter,
-        string parameterName,
-        string defaultUm,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_CAT", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.NonQueryAsync(
-            "INSERT INTO dbo.MAS_SPEC_PARAMETER (KEY_PARAMETER, PARAMETER_NAME, PARAMETER_DEFAULT_UM, IS_DELETED) VALUES (@key, @name, @um, 0)",
-            new[]
-            {
-                new SqlParameter("@key",  keyParameter),
-                new SqlParameter("@name", parameterName),
-                new SqlParameter("@um",   defaultUm)
-            });
-    }
-
-    public async Task<SqlActionResult> Specs_UpdateMasterParameter(
-        string keyParameter,
-        string parameterName,
-        string defaultUm,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_CAT", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.NonQueryAsync(
-            "UPDATE dbo.MAS_SPEC_PARAMETER SET PARAMETER_NAME = @name, PARAMETER_DEFAULT_UM = @um WHERE KEY_PARAMETER = @key",
-            new[]
-            {
-                new SqlParameter("@key",  keyParameter),
-                new SqlParameter("@name", parameterName),
-                new SqlParameter("@um",   defaultUm)
-            });
-    }
-
-    /// <summary>
-    /// Soft-deletes a master parameter. Requires SPECS_CATALOG permission.
-    /// Transaction: soft-deletes in MAS_SPEC_PARAMETER then in all MAS_SPEC_FAMILY_VS_PARAMETER rows.
-    /// TR_FAMILY_PARAM_IS_DELETED_SYNC fires per row and propagates IS_DELETED to MATNRs automatically.
-    /// </summary>
-    public async Task<SqlActionResult> Specs_DisableMasterParameter(
-        string keyParameter,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_CAT", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.ExecuteInTransactionAsync(async (tx, ct) =>
-        {
-            await _db.NonQueryAsync(
-                "UPDATE dbo.MAS_SPEC_PARAMETER SET IS_DELETED = 1 WHERE KEY_PARAMETER = @key",
-                new[] { new SqlParameter("@key", keyParameter) },
-                transaction: tx,
-                ct: ct);
-
-            // Each row update fires TR_FAMILY_PARAM_IS_DELETED_SYNC → propagates to MATNR_PARAMETERS
-            await _db.NonQueryAsync(
-                "UPDATE dbo.MAS_SPEC_FAMILY_VS_PARAMETER SET IS_DELETED = 1 WHERE KEY_PARAMETER = @key",
-                new[] { new SqlParameter("@key", keyParameter) },
-                transaction: tx,
-                ct: ct);
-        }, cancellationToken);
-    }
-
-    // ── Write — Catalog: Family × Parameter ──────────────────────────────────
-
-    /// <summary>
-    /// Links a parameter to a family with the given type (M/O/I). Requires SPECS_CATALOG permission.
-    /// TR_FAMILY_PARAM_ADDED fires and inserts a null value row in every active MATNR of that family.
-    /// </summary>
-    public async Task<SqlActionResult> Specs_AddFamilyParameter(
-        string famKey,
-        string keyParameter,
-        string typeParameter,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_CAT", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.NonQueryAsync(
-            "INSERT INTO dbo.MAS_SPEC_FAMILY_VS_PARAMETER (FAM_KEY, KEY_PARAMETER, TYPE_PARAMETER, IS_DELETED) VALUES (@fam, @key, @type, 0)",
-            new[]
-            {
-                new SqlParameter("@fam",  famKey),
-                new SqlParameter("@key",  keyParameter),
-                new SqlParameter("@type", typeParameter)
-            });
-    }
-
-    public async Task<SqlActionResult> Specs_UpdateFamilyParameterType(
-        string famKey,
-        string keyParameter,
-        string typeParameter,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_CAT", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.NonQueryAsync(
-            "UPDATE dbo.MAS_SPEC_FAMILY_VS_PARAMETER SET TYPE_PARAMETER = @type WHERE FAM_KEY = @fam AND KEY_PARAMETER = @key",
-            new[]
-            {
-                new SqlParameter("@fam",  famKey),
-                new SqlParameter("@key",  keyParameter),
-                new SqlParameter("@type", typeParameter)
-            });
-    }
-
-    /// <summary>
-    /// Soft-deletes a family×parameter link. Requires SPECS_CATALOG permission.
-    /// TR_FAMILY_PARAM_IS_DELETED_SYNC fires and propagates IS_DELETED to all MATNR rows of that family.
-    /// </summary>
-    public async Task<SqlActionResult> Specs_DisableFamilyParameter(
-        string famKey,
-        string keyParameter,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_CAT", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.NonQueryAsync(
-            "UPDATE dbo.MAS_SPEC_FAMILY_VS_PARAMETER SET IS_DELETED = 1 WHERE FAM_KEY = @fam AND KEY_PARAMETER = @key",
-            new[]
-            {
-                new SqlParameter("@fam", famKey),
-                new SqlParameter("@key", keyParameter)
-            });
-    }
-
-    // ── Write — Catalog: Units of Measure ────────────────────────────────────
-
-    public async Task<SqlActionResult> Specs_AddUnit(
-        string umCode,
-        string umDescription,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_CAT", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.NonQueryAsync(
-            "INSERT INTO dbo.MAS_SPEC_UM (UM_CODE, UM_DESCRIPTION) VALUES (@code, @desc)",
-            new[]
-            {
-                new SqlParameter("@code", umCode),
-                new SqlParameter("@desc", umDescription)
-            });
-    }
-
-    public async Task<SqlActionResult> Specs_UpdateUnit(
-        string umCode,
-        string umDescription,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_CAT", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.NonQueryAsync(
-            "UPDATE dbo.MAS_SPEC_UM SET UM_DESCRIPTION = @desc WHERE UM_CODE = @code",
-            new[]
-            {
-                new SqlParameter("@code", umCode),
-                new SqlParameter("@desc", umDescription)
-            });
-    }
-
-    public async Task<SqlActionResult> Specs_DeleteUnit(
-        string umCode,
-        string userRequester = "System",
-        CancellationToken cancellationToken = default)
-    {
-        var perm = await Specs_CheckPermission("SPECS_CAT", userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
-
-        return await _db.NonQueryAsync(
-            "DELETE FROM dbo.MAS_SPEC_UM WHERE UM_CODE = @code",
-            new[] { new SqlParameter("@code", umCode) });
-    }
-
     // ── Import — JSON → MATNR tables ─────────────────────────────────────────
 
     /// <summary>
@@ -1211,16 +306,18 @@ public partial class Class_Projects_Quality_Gates
     ///
     /// Header logic:
     ///   - If MATNR+EDITION does not exist → INSERT (trigger creates parameter rows automatically).
-    ///   - If MATNR+EDITION already exists → UPDATE description and issue date only.
+    ///   - If MATNR+EDITION already exists → only EMPTY header fields are filled
+    ///     (description, spec file path, issue date); manual header values are never overwritten.
     ///
     /// Parameter logic (per JSON entry):
-    ///   - value_typ is tried as decimal; on failure it goes to VALUE_TYP_TEXT.
-    ///   - Only parameters already present in MAS_SPEC_MATNR_PARAMETERS are updated.
-    ///     Parameters in the JSON but absent from the DB (not in the family) are skipped and counted.
+    ///   - value_typ is tried as decimal; on failure it goes to VALUE_TEXT.
+    ///   - Only active parameters of the product are updated; others are skipped and counted.
+    ///   - Parameters with DATA_SOURCE='MANUAL' are NEVER overwritten (counted in ParametersProtected).
+    ///   - Only values that really change are written, marked DATA_SOURCE='DOC'.
     ///   - Parameters in DB but absent from the JSON are left untouched.
-    ///   - UM: null/empty in JSON → existing DB value is preserved (COALESCE in SQL).
+    ///   - UM: null/empty in JSON → existing DB value is preserved. Unknown UM → saved + warning.
     ///
-    /// Requires SPECS_CRT permission.
+    /// Requires @SPECS permission.
     /// </summary>
     public async Task<OperationResult<SPEC_IMPORT_RESULT>> Specs_ImportFromJson(
         string filePath,
@@ -1228,7 +325,7 @@ public partial class Class_Projects_Quality_Gates
         CancellationToken cancellationToken = default)
     {
         // 1 — permission
-        var perm = await Specs_CheckPermission("SPECS_CRT", userRequester, cancellationToken);
+        var perm = await Specs_CheckPermission(SPECS_KEY_PROCESS, userRequester, cancellationToken);
         if (!perm.Success)
             return OperationResult<SPEC_IMPORT_RESULT>.Fail(perm.ErrorMessage);
 
@@ -1312,11 +409,11 @@ public partial class Class_Projects_Quality_Gates
         }
         else
         {
-            // 5b — UPDATE header editable fields only
-            var updateResult = await Specs_UpdateProductHeader(
+            // 5b — existing header: only fill EMPTY fields (manual values are never overwritten)
+            var updateResult = await Specs_ImportFillHeaderAsync(
                 matnr, edition,
-                root.Description?.Trim() ?? string.Empty,
-                root.SourceUrl?.Trim(),
+                root.Description,
+                root.SourceUrl,
                 issueDate,
                 userRequester,
                 cancellationToken);
@@ -1327,23 +424,12 @@ public partial class Class_Projects_Quality_Gates
             result.HeaderCreated = false;
         }
 
-        // 6 — resolve which KEY_PARAMETERs actually exist in DB for this MATNR+EDITION
-        //     (after INSERT the trigger has already created them; after UPDATE they were there)
-        const string sqlExistingParams = @"
-            SELECT KEY_PARAMETER
-            FROM   dbo.MAS_SPEC_MATNR_PARAMETERS
-            WHERE  MATNR = @matnr AND EDITION = @edition AND IS_DELETED = 0";
+        // 6 — current product (after INSERT the trigger has already created the parameter rows)
+        var current = await Specs_LoadProductAsync(matnr, edition, cancellationToken);
+        if (!current.Success)
+            return OperationResult<SPEC_IMPORT_RESULT>.Fail($"Error reading existing parameters: {current.ErrorMessage}");
 
-        var existingParamsQuery = await _db.SelectAsync(sqlExistingParams,
-            new[] { new SqlParameter("@matnr", matnr), new SqlParameter("@edition", edition) },
-            cancellationToken);
-
-        if (!existingParamsQuery.Success || existingParamsQuery.DTResults == null)
-            return OperationResult<SPEC_IMPORT_RESULT>.Fail($"Error reading existing parameters: {existingParamsQuery.Message}");
-
-        var dbKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (DataRow row in existingParamsQuery.DTResults.Rows)
-            dbKeys.Add(GetString(row, "KEY_PARAMETER").Trim());
+        var dbKeys = new HashSet<string>(current.Data.Parameters.Select(p => p.KeyParameter), StringComparer.OrdinalIgnoreCase);
 
         // 7 — build batch update list from JSON parameters
         var updates = new List<SPEC_PARAM_UPDATE>();
@@ -1393,17 +479,33 @@ public partial class Class_Projects_Quality_Gates
             });
         }
 
-        // 8 — persist parameter values
-        if (updates.Count > 0)
-        {
-            var batchResult = await Specs_UpdateParametersBatch(
-                matnr, edition, updates, userRequester, cancellationToken);
+        // 8 — diff + protection of MANUAL values, then persist only real changes as DATA_SOURCE='DOC'
+        var units = await Specs_LoadActiveUnitsAsync(cancellationToken);
+        if (!units.Success)
+            return OperationResult<SPEC_IMPORT_RESULT>.Fail(units.ErrorMessage);
 
-            if (!batchResult.Success)
-                return OperationResult<SPEC_IMPORT_RESULT>.Fail($"Error updating parameters: {batchResult.Message}");
+        var plan = Specs_BuildParameterPlan(current.Data.Parameters, updates,
+                                            isImport: true, keepUmWhenEmpty: true, units.Data);
+        result.Warnings.AddRange(plan.Warnings);
+        result.ParametersProtected = plan.Protected;
+        result.ParametersSkipped  += updates.Count - plan.Changes.Count - plan.Protected - plan.Unchanged;
+
+        if (plan.Changes.Count > 0)
+        {
+            int written = 0;
+            var tx = await _db.ExecuteInTransactionAsync(async (t, ct) =>
+            {
+                await Specs_SetSessionUserAsync(userRequester, t, ct);
+                written = await Specs_WriteParameterChangesAsync(matnr, edition, plan.Changes,
+                              SPECS_SRC_DOC, protectManual: true, userRequester, t, ct);
+            }, cancellationToken);
+
+            if (!tx.Success)
+                return OperationResult<SPEC_IMPORT_RESULT>.Fail($"Error updating parameters: {tx.Message}");
+
+            result.ParametersUpdated = written;
         }
 
-        result.ParametersUpdated = updates.Count;
         return OperationResult<SPEC_IMPORT_RESULT>.Ok(result);
     }
 
