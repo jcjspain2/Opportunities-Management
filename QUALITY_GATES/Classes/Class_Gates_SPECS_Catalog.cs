@@ -11,6 +11,8 @@ namespace QUALITY_GATES.Classes;
 //  SPECS — Area 1: master data maintenance
 //    MAS_SPEC_UM · MAS_SPEC_PARAMETER_CATEGORY · MAS_SPEC_PARAMETER
 //    MAS_SPEC_CATEGORY · MAS_SPEC_FAMILY · MAS_SPEC_FAMILY_VS_PARAMETER · MAS_SPEC_UM_CONVERSION
+//    MAS_SPEC_PARAMETER_UM (allowed units per parameter)
+//    MAS_SPEC_PARAMETER_VALUE (possible values of list parameters, VALUE_TYPE = 'L')
 //
 //  Rules
 //    - Delete = soft delete (IS_DELETED = 1). Enable* reactivates.
@@ -55,6 +57,9 @@ public class SPEC_PARAMETER
     public string ParameterDefaultUm    { get; set; } = string.Empty;
     public string ParameterCategoryKey  { get; set; } = string.Empty;  // PARAMETER_CATEGORY
     public string ParameterCategoryName { get; set; } = string.Empty;  // read only (joined)
+    /// <summary>VALUE_TYPE: N = numeric (MIN/TYP/MAX + unit) · L = list (value from MAS_SPEC_PARAMETER_VALUE) · T = free text.
+    /// Add: empty = N. Update: empty = keep the current type (callers written before 2026-11-21 do not send it).</summary>
+    public string? ValueType            { get; set; }
     public bool   IsDeleted             { get; set; }
 }
 
@@ -63,6 +68,7 @@ public class SPEC_FAMILY_PARAMETER
     public string FamKey                { get; set; } = string.Empty;
     public string KeyParameter          { get; set; } = string.Empty;
     public string ParameterName         { get; set; } = string.Empty;
+    public string ValueType             { get; set; } = "N";          // read only: N / L / T (MAS_SPEC_PARAMETER.VALUE_TYPE)
     public string DefaultUm             { get; set; } = string.Empty;
     public string ParameterCategoryKey  { get; set; } = string.Empty;
     public string ParameterCategoryName { get; set; } = string.Empty;
@@ -94,6 +100,72 @@ public class SPEC_UNIT_CONVERSION
     public DateTime CreatedDate     { get; set; }
 }
 
+/// <summary>
+/// MAS_SPEC_PARAMETER_UM row — a unit allowed for a parameter (source of the UI picking list
+/// for UM_PARAMETER). The default UM of the parameter is always an active allowed unit.
+/// </summary>
+public class SPEC_PARAMETER_UNIT
+{
+    public string    KeyParameter  { get; set; } = string.Empty;
+    public string    ParameterName { get; set; } = string.Empty;  // read only (joined)
+    public string    UmCode        { get; set; } = string.Empty;  // case-sensitive (mH ≠ MH)
+    public string    UmDescription { get; set; } = string.Empty;  // read only (joined)
+    public bool      IsDefault     { get; set; }                  // read only: = PARAMETER_DEFAULT_UM
+    public bool      IsDeleted     { get; set; }
+
+    // Conversion info (read only) — a unit is a VARIANT when it is the UM_FROM of an active conversion
+    public bool      IsBase        { get; set; } = true;
+    public string    BaseUnit      { get; set; } = string.Empty;  // = UmCode when IsBase
+    public decimal   Factor        { get; set; } = 1m;            // value_in_BaseUnit = value × Factor
+
+    public string    CreatedBy     { get; set; } = string.Empty;
+    public DateTime  CreatedDate   { get; set; }
+    public string    ModifiedBy    { get; set; } = string.Empty;
+    public DateTime? ModifiedDate  { get; set; }
+}
+
+/// <summary>
+/// One option of the UM_PARAMETER picking list of a CIR or MATNR parameter
+/// (MAS_SPEC_PARAMETER_UM + MAS_SPEC_UM.UM_DESCRIPTION). Default UM first, then by code.
+/// </summary>
+public class SPEC_UNIT_OPTION
+{
+    public string UmCode        { get; set; } = string.Empty;  // key (case-sensitive: mH ≠ MH)
+    public string UmDescription { get; set; } = string.Empty;
+    public bool   IsDefault     { get; set; }                  // default UM of the parameter
+    public bool   IsActive      { get; set; } = true;          // false = current UM_PARAMETER no longer allowed: shown, not selectable
+}
+
+/// <summary>
+/// MAS_SPEC_PARAMETER_VALUE row — one possible value of a list parameter (VALUE_TYPE = 'L').
+/// VALUE_CODE is case-insensitive (SMD = smd) and is the text stored in VALUE_TEXT / VALUE_TYP_TEXT.
+/// </summary>
+public class SPEC_LIST_VALUE
+{
+    public string    KeyParameter     { get; set; } = string.Empty;
+    public string    ParameterName    { get; set; } = string.Empty;  // read only (joined)
+    public string    ValueCode        { get; set; } = string.Empty;  // max 50 (fits CIR VALUE_TYP_TEXT)
+    public string    ValueDescription { get; set; } = string.Empty;  // max 200
+    public int       SortOrder        { get; set; }
+    public bool      IsDeleted        { get; set; }
+    public string    CreatedBy        { get; set; } = string.Empty;
+    public DateTime  CreatedDate      { get; set; }
+    public string    ModifiedBy       { get; set; } = string.Empty;
+    public DateTime? ModifiedDate     { get; set; }
+}
+
+/// <summary>
+/// One option of the value picking list of a list parameter (VALUE_TYPE = 'L') of a CIR or MATNR row.
+/// Ordered by SORT_ORDER, then code.
+/// </summary>
+public class SPEC_VALUE_OPTION
+{
+    public string ValueCode        { get; set; } = string.Empty;   // stored text
+    public string ValueDescription { get; set; } = string.Empty;
+    public int    SortOrder        { get; set; }
+    public bool   IsActive         { get; set; } = true;           // false = current value disabled in the list: shown, not selectable
+}
+
 // ── Business layer ────────────────────────────────────────────────────────────────────
 
 public partial class Class_Projects_Quality_Gates
@@ -107,7 +179,7 @@ public partial class Class_Projects_Quality_Gates
     private const int SPECS_LEN_PARCAT_NAME  = 50;
     private const int SPECS_LEN_UM_DESC      = 75;
     private const int SPECS_LEN_UM_CODE      = 20;   // MAS_SPEC_UM.UM_CODE / conversion UM_FROM, UM_TO nvarchar(20)
-    private const int SPECS_LEN_DEFAULT_UM   = 10;   // MAS_SPEC_PARAMETER.PARAMETER_DEFAULT_UM nchar(10)
+    private const int SPECS_LEN_DEFAULT_UM   = 20;   // MAS_SPEC_PARAMETER.PARAMETER_DEFAULT_UM nvarchar(20) CS, FK → MAS_SPEC_UM
 
     private static readonly string[] SPECS_PARAMETER_TYPES = ["M", "O", "I"];
 
@@ -215,7 +287,7 @@ public partial class Class_Projects_Quality_Gates
     {
         string sql = @"
             SELECT p.KEY_PARAMETER, p.PARAMETER_NAME, p.PARAMETER_DEFAULT_UM, p.IS_DELETED,
-                   p.PARAMETER_CATEGORY, pc.CATEGORY_PAR_NAME
+                   p.PARAMETER_CATEGORY, pc.CATEGORY_PAR_NAME, p.VALUE_TYPE
             FROM   dbo.MAS_SPEC_PARAMETER p
             LEFT JOIN dbo.MAS_SPEC_PARAMETER_CATEGORY pc ON pc.KEY_CATEGORY_PAR = p.PARAMETER_CATEGORY
             WHERE  1 = 1";
@@ -242,6 +314,7 @@ public partial class Class_Projects_Quality_Gates
                 ParameterDefaultUm    = GetString(row, "PARAMETER_DEFAULT_UM").Trim(),
                 ParameterCategoryKey  = GetString(row, "PARAMETER_CATEGORY").Trim(),
                 ParameterCategoryName = GetString(row, "CATEGORY_PAR_NAME").Trim(),
+                ValueType             = Specs_NormValueType(GetString(row, "VALUE_TYPE")),
                 IsDeleted             = GetBoolean(row, "IS_DELETED")
             });
 
@@ -259,7 +332,7 @@ public partial class Class_Projects_Quality_Gates
     {
         string sql = @"
             SELECT fvp.FAM_KEY, fvp.KEY_PARAMETER, fvp.TYPE_PARAMETER, fvp.IS_DELETED,
-                   p.PARAMETER_NAME, p.PARAMETER_DEFAULT_UM, p.PARAMETER_CATEGORY, pc.CATEGORY_PAR_NAME
+                   p.PARAMETER_NAME, p.PARAMETER_DEFAULT_UM, p.PARAMETER_CATEGORY, pc.CATEGORY_PAR_NAME, p.VALUE_TYPE
             FROM   dbo.MAS_SPEC_FAMILY_VS_PARAMETER fvp
             JOIN   dbo.MAS_SPEC_PARAMETER p ON p.KEY_PARAMETER = fvp.KEY_PARAMETER
             LEFT JOIN dbo.MAS_SPEC_PARAMETER_CATEGORY pc ON pc.KEY_CATEGORY_PAR = p.PARAMETER_CATEGORY
@@ -279,6 +352,7 @@ public partial class Class_Projects_Quality_Gates
                 FamKey                = GetString(row, "FAM_KEY").Trim(),
                 KeyParameter          = GetString(row, "KEY_PARAMETER").Trim(),
                 ParameterName         = GetString(row, "PARAMETER_NAME").Trim(),
+                ValueType             = Specs_NormValueType(GetString(row, "VALUE_TYPE")),
                 DefaultUm             = GetString(row, "PARAMETER_DEFAULT_UM").Trim(),
                 ParameterCategoryKey  = GetString(row, "PARAMETER_CATEGORY").Trim(),
                 ParameterCategoryName = GetString(row, "CATEGORY_PAR_NAME").Trim(),
@@ -361,7 +435,10 @@ public partial class Class_Projects_Quality_Gates
             [new SqlParameter("@k", code), new SqlParameter("@desc", desc)], ct: cancellationToken);
     }
 
-    /// <summary>Soft delete. Blocked while an active master parameter uses it as default UM.</summary>
+    /// <summary>
+    /// Soft delete. Blocked while an active master parameter uses it as default UM, while it is part of an
+    /// active conversion, or while it is an active allowed unit (MAS_SPEC_PARAMETER_UM) of an active parameter.
+    /// </summary>
     public async Task<SqlActionResult> Specs_DisableUnit(
         string umCode,
         string userRequester = "System", CancellationToken cancellationToken = default)
@@ -390,6 +467,15 @@ public partial class Class_Projects_Quality_Gates
                 () => P("@k", code),
                 _ => $"Unit '{code}' is a variant with an active conversion. Disable the conversion first.",
                 cancellationToken) is { } e6) return Specs_Fail(e6);
+
+        if (await Specs_RequireNoChildrenAsync(@"
+                SELECT COUNT(*)
+                FROM   dbo.MAS_SPEC_PARAMETER_UM a
+                JOIN   dbo.MAS_SPEC_PARAMETER p ON p.KEY_PARAMETER = a.KEY_PARAMETER AND p.IS_DELETED = 0
+                WHERE  a.UM_CODE = @k AND a.IS_DELETED = 0",
+                () => P("@k", code),
+                n => $"Unit '{code}' is an allowed unit of {n} active parameter(s). Disable it there first.",
+                cancellationToken) is { } e7) return Specs_Fail(e7);
 
         return await Specs_SetDeletedAsync("dbo.MAS_SPEC_UM", "UM_CODE = @k", true, P("@k", code), cancellationToken);
     }
@@ -648,6 +734,8 @@ public partial class Class_Projects_Quality_Gates
     /// <summary>
     /// Creates a master parameter. Uses KeyParameter, ParameterName, ParameterDefaultUm and
     /// ParameterCategoryKey from <paramref name="parameter"/>. UM and category must exist and be active.
+    /// In the same transaction the allowed units (MAS_SPEC_PARAMETER_UM) get the default UM
+    /// (trigger TR_SPEC_PARAMETER_DEFAULT_UM) plus its active variants (uH, μH, mH... for µH).
     /// </summary>
     public async Task<SqlActionResult> Specs_AddMasterParameter(
         SPEC_PARAMETER parameter,
@@ -658,22 +746,40 @@ public partial class Class_Projects_Quality_Gates
         if (Specs_ValidateName(parameter.ParameterName, "Parameter name", SPECS_LEN_PARAM_NAME, out var name) is { } e2) return Specs_Fail(e2);
         if (Specs_ValidateUnitCode(parameter.ParameterDefaultUm, "Default UM", out var um, SPECS_LEN_DEFAULT_UM) is { } e3) return Specs_Fail(e3);
         if (Specs_ValidateKey(parameter.ParameterCategoryKey, "Parameter category", out var cat) is { } e4) return Specs_Fail(e4);
+        if (Specs_ValidateValueType(parameter.ValueType, SPECS_VT_NUMERIC, out var valueType) is { } eVt) return Specs_Fail(eVt);
         if (await Specs_CatalogPermissionAsync(userRequester, cancellationToken) is { } e5) return Specs_Fail(e5);
 
         if (await Specs_RequireNewKeyAsync(SQL_PARAM_STATE, () => P("@k", key), $"Parameter '{key}'", cancellationToken) is { } e6) return Specs_Fail(e6);
         if (await Specs_RequireActiveAsync(SQL_UM_STATE, () => P("@k", um), $"Unit '{um}'", cancellationToken) is { } e7) return Specs_Fail(e7);
         if (await Specs_RequireActiveAsync(SQL_PARCAT_STATE, () => P("@k", cat), $"Parameter category '{cat}'", cancellationToken) is { } e8) return Specs_Fail(e8);
 
-        return await _db.NonQueryAsync(@"
-            INSERT INTO dbo.MAS_SPEC_PARAMETER (KEY_PARAMETER, PARAMETER_NAME, PARAMETER_DEFAULT_UM, PARAMETER_CATEGORY, IS_DELETED)
-            VALUES (@k, @name, @um, @cat, 0)",
-            [new SqlParameter("@k", key), new SqlParameter("@name", name),
-             new SqlParameter("@um", um), new SqlParameter("@cat", cat)], ct: cancellationToken);
+        int written = 0;
+        var result = await _db.ExecuteInTransactionAsync(async (tx, ct) =>
+        {
+            await Specs_SetSessionUserAsync(userRequester, tx, ct);   // CREATED_BY of the trigger row
+
+            var r = await _db.NonQueryAsync(@"
+                INSERT INTO dbo.MAS_SPEC_PARAMETER (KEY_PARAMETER, PARAMETER_NAME, PARAMETER_DEFAULT_UM, PARAMETER_CATEGORY, VALUE_TYPE, IS_DELETED)
+                VALUES (@k, @name, @um, @cat, @vt, 0)",
+                [new SqlParameter("@k", key), new SqlParameter("@name", name),
+                 new SqlParameter("@um", um), new SqlParameter("@cat", cat), new SqlParameter("@vt", valueType)], transaction: tx, ct: ct);
+            if (!r.Success) throw new InvalidOperationException(r.Message);
+            written = r.RecordsAffected;
+
+            await Specs_AllowUnitWithVariantsAsync(key, um, userRequester, tx, ct);
+        }, cancellationToken);
+
+        if (result.Success) result.RecordsAffected = written;
+        return result;
     }
 
     /// <summary>
     /// Updates name, default UM and category of a master parameter (identified by KeyParameter).
     /// A changed UM / category must exist and be active; an unchanged one is accepted as is.
+    /// A new default UM is added to the allowed units by TR_SPEC_PARAMETER_DEFAULT_UM; the previous
+    /// allowed units are kept (existing CIR / MATNR rows stay valid).
+    /// ValueType empty = keep the current type. A type change does not touch existing CIR / MATNR rows
+    /// nor the list values (MAS_SPEC_PARAMETER_VALUE); the new rules apply to the next reviewed (MANUAL) change.
     /// </summary>
     public async Task<SqlActionResult> Specs_UpdateMasterParameter(
         SPEC_PARAMETER parameter,
@@ -687,15 +793,18 @@ public partial class Class_Projects_Quality_Gates
         if (await Specs_CatalogPermissionAsync(userRequester, cancellationToken) is { } e5) return Specs_Fail(e5);
 
         var q = await _db.SelectAsync(
-            "SELECT PARAMETER_DEFAULT_UM, PARAMETER_CATEGORY FROM dbo.MAS_SPEC_PARAMETER WHERE KEY_PARAMETER = @k",
+            "SELECT PARAMETER_DEFAULT_UM, PARAMETER_CATEGORY, VALUE_TYPE FROM dbo.MAS_SPEC_PARAMETER WHERE KEY_PARAMETER = @k",
             P("@k", key), cancellationToken);
         if (!q.Success || q.DTResults == null) return Specs_Fail($"Error reading parameter '{key}': {q.Message}");
         if (q.DTResults.Rows.Count == 0) return Specs_Fail($"Parameter '{key}' does not exist.");
 
         var currentUm  = GetString(q.DTResults.Rows[0], "PARAMETER_DEFAULT_UM").Trim();
         var currentCat = GetString(q.DTResults.Rows[0], "PARAMETER_CATEGORY").Trim();
+        var currentVt  = Specs_NormValueType(GetString(q.DTResults.Rows[0], "VALUE_TYPE"));
+        if (Specs_ValidateValueType(parameter.ValueType, currentVt, out var valueType) is { } eVt) return Specs_Fail(eVt);
 
-        if (!string.Equals(um, currentUm, StringComparison.OrdinalIgnoreCase) &&
+        // units are case-sensitive (mH ≠ MH): a change of case is a different unit and must be validated
+        if (!string.Equals(um, currentUm, StringComparison.Ordinal) &&
             await Specs_RequireActiveAsync(SQL_UM_STATE, () => P("@k", um), $"Unit '{um}'", cancellationToken) is { } e6)
             return Specs_Fail(e6);
 
@@ -705,10 +814,10 @@ public partial class Class_Projects_Quality_Gates
 
         return await _db.NonQueryAsync(@"
             UPDATE dbo.MAS_SPEC_PARAMETER
-            SET    PARAMETER_NAME = @name, PARAMETER_DEFAULT_UM = @um, PARAMETER_CATEGORY = @cat
+            SET    PARAMETER_NAME = @name, PARAMETER_DEFAULT_UM = @um, PARAMETER_CATEGORY = @cat, VALUE_TYPE = @vt
             WHERE  KEY_PARAMETER = @k",
             [new SqlParameter("@k", key), new SqlParameter("@name", name),
-             new SqlParameter("@um", um), new SqlParameter("@cat", cat)], ct: cancellationToken);
+             new SqlParameter("@um", um), new SqlParameter("@cat", cat), new SqlParameter("@vt", valueType)], ct: cancellationToken);
     }
 
     /// <summary>
@@ -1015,6 +1124,715 @@ public partial class Class_Projects_Quality_Gates
         return await Specs_SetDeletedAsync("dbo.MAS_SPEC_FAMILY_VS_PARAMETER", "FAM_KEY = @f AND KEY_PARAMETER = @k", false, P2("@f", fam, "@k", key), cancellationToken);
     }
 
+    // ══ Allowed units per parameter (MAS_SPEC_PARAMETER_UM) ══════════════════════════
+    //   PK (KEY_PARAMETER, UM_CODE) · FK → MAS_SPEC_PARAMETER and MAS_SPEC_UM.
+    //   Active rows = UI picking list for UM_PARAMETER (CIR / MATNR), preselected on the default UM.
+    //   The default UM is always an active allowed unit (TR_SPEC_PARAMETER_DEFAULT_UM) and cannot be disabled.
+    //   No update (key-only table): add / disable / enable.
+
+    /// <summary>
+    /// Allowed units of a parameter (or of every parameter when <paramref name="keyParameter"/> is null),
+    /// ordered by parameter, default UM first, then unit code.
+    /// includeDeleted = false returns only rows usable in the picking list
+    /// (allowed row active AND unit active in MAS_SPEC_UM).
+    /// </summary>
+    public async Task<OperationResult<List<SPEC_PARAMETER_UNIT>>> Specs_GetParameterUnits(
+        string? keyParameter = null,
+        bool includeDeleted = false,
+        CancellationToken cancellationToken = default)
+    {
+        string sql = @"
+            SELECT a.KEY_PARAMETER, p.PARAMETER_NAME, a.UM_CODE, u.UM_DESCRIPTION,
+                   CASE WHEN a.UM_CODE = p.PARAMETER_DEFAULT_UM THEN 1 ELSE 0 END AS IS_DEFAULT,
+                   a.IS_DELETED, c.UM_TO, c.FACTOR,
+                   a.CREATED_BY, a.CREATED_DATE, a.MODIFIED_BY, a.MODIFIED_DATE
+            FROM   dbo.MAS_SPEC_PARAMETER_UM a
+            JOIN   dbo.MAS_SPEC_PARAMETER p ON p.KEY_PARAMETER = a.KEY_PARAMETER
+            JOIN   dbo.MAS_SPEC_UM        u ON u.UM_CODE       = a.UM_CODE
+            LEFT JOIN dbo.MAS_SPEC_UM_CONVERSION c ON c.UM_FROM = a.UM_CODE AND c.IS_DELETED = 0
+            WHERE  1 = 1";
+        var parameters = new List<SqlParameter>();
+
+        if (keyParameter != null)
+        {
+            if (Specs_ValidateKey(keyParameter, "Parameter key", out var key) is { } e1)
+                return OperationResult<List<SPEC_PARAMETER_UNIT>>.Fail(e1);
+            sql += " AND a.KEY_PARAMETER = @k";
+            parameters.Add(new SqlParameter("@k", key));
+        }
+        if (!includeDeleted) sql += " AND a.IS_DELETED = 0 AND u.IS_DELETED = 0";
+        sql += " ORDER BY a.KEY_PARAMETER, IS_DEFAULT DESC, a.UM_CODE";
+
+        var q = await _db.SelectAsync(sql, parameters.ToArray(), cancellationToken);
+        if (!q.Success || q.DTResults == null)
+            return OperationResult<List<SPEC_PARAMETER_UNIT>>.Fail($"Error: {q.Message}");
+
+        var list = new List<SPEC_PARAMETER_UNIT>();
+        foreach (DataRow row in q.DTResults.Rows)
+        {
+            var code   = GetString(row, "UM_CODE").Trim();
+            var baseUm = GetString(row, "UM_TO").Trim();
+            list.Add(new SPEC_PARAMETER_UNIT
+            {
+                KeyParameter  = GetString(row, "KEY_PARAMETER").Trim(),
+                ParameterName = GetString(row, "PARAMETER_NAME").Trim(),
+                UmCode        = code,
+                UmDescription = GetString(row, "UM_DESCRIPTION").Trim(),
+                IsDefault     = Convert.ToInt32(row["IS_DEFAULT"]) == 1,
+                IsDeleted     = GetBoolean(row, "IS_DELETED"),
+                IsBase        = baseUm.Length == 0,
+                BaseUnit      = baseUm.Length == 0 ? code : baseUm,
+                Factor        = baseUm.Length == 0 ? 1m : GetDecimalNullable(row, "FACTOR") ?? 1m,
+                CreatedBy     = GetString(row, "CREATED_BY").Trim(),
+                CreatedDate   = GetDateTime(row, "CREATED_DATE"),
+                ModifiedBy    = GetString(row, "MODIFIED_BY").Trim(),
+                ModifiedDate  = row["MODIFIED_DATE"] is DateTime md ? md : null
+            });
+        }
+
+        return OperationResult<List<SPEC_PARAMETER_UNIT>>.Ok(list);
+    }
+
+    /// <summary>Allows a unit for a parameter. Parameter and unit must exist and be active.</summary>
+    public async Task<SqlActionResult> Specs_AddParameterUnit(
+        string keyParameter, string umCode,
+        string userRequester = "System", CancellationToken cancellationToken = default)
+    {
+        if (Specs_ValidateKey(keyParameter, "Parameter key", out var key) is { } e1) return Specs_Fail(e1);
+        if (Specs_ValidateUnitCode(umCode, "Unit code", out var code, SPECS_LEN_UM_CODE) is { } e2) return Specs_Fail(e2);
+        if (await Specs_CatalogPermissionAsync(userRequester, cancellationToken) is { } e3) return Specs_Fail(e3);
+
+        if (await Specs_RequireActiveAsync(SQL_PARAM_STATE, () => P("@k", key), $"Parameter '{key}'", cancellationToken) is { } e4) return Specs_Fail(e4);
+        if (await Specs_RequireActiveAsync(SQL_UM_STATE, () => P("@k", code), $"Unit '{code}'", cancellationToken) is { } e5) return Specs_Fail(e5);
+        if (await Specs_RequireNewKeyAsync(SQL_PARUM_STATE, () => P2("@k", key, "@u", code), $"Unit '{code}' for parameter '{key}'", cancellationToken) is { } e6) return Specs_Fail(e6);
+
+        return await _db.NonQueryAsync(
+            "INSERT INTO dbo.MAS_SPEC_PARAMETER_UM (KEY_PARAMETER, UM_CODE, IS_DELETED, CREATED_BY) VALUES (@k, @u, 0, @user)",
+            [new SqlParameter("@k", key), new SqlParameter("@u", code), new SqlParameter("@user", userRequester)],
+            ct: cancellationToken);
+    }
+
+    /// <summary>
+    /// Allows a base unit and all its active variants (MAS_SPEC_UM_CONVERSION) for a parameter, in one
+    /// transaction. Missing rows are inserted, disabled ones re-enabled. <paramref name="baseUm"/> must be
+    /// an active base unit (not a variant). RecordsAffected = rows inserted + re-enabled.
+    /// </summary>
+    public async Task<SqlActionResult> Specs_AddParameterUnitWithVariants(
+        string keyParameter, string baseUm,
+        string userRequester = "System", CancellationToken cancellationToken = default)
+    {
+        if (Specs_ValidateKey(keyParameter, "Parameter key", out var key) is { } e1) return Specs_Fail(e1);
+        if (Specs_ValidateUnitCode(baseUm, "Base unit", out var code, SPECS_LEN_UM_CODE) is { } e2) return Specs_Fail(e2);
+        if (await Specs_CatalogPermissionAsync(userRequester, cancellationToken) is { } e3) return Specs_Fail(e3);
+
+        if (await Specs_RequireActiveAsync(SQL_PARAM_STATE, () => P("@k", key), $"Parameter '{key}'", cancellationToken) is { } e4) return Specs_Fail(e4);
+        if (await Specs_RequireActiveAsync(SQL_UM_STATE, () => P("@k", code), $"Unit '{code}'", cancellationToken) is { } e5) return Specs_Fail(e5);
+
+        var baseOf = await _db.SelectAsync(
+            "SELECT UM_TO FROM dbo.MAS_SPEC_UM_CONVERSION WHERE UM_FROM = @k AND IS_DELETED = 0",
+            P("@k", code), cancellationToken);
+        if (!baseOf.Success || baseOf.DTResults == null) return Specs_Fail($"Error: {baseOf.Message}");
+        if (baseOf.DTResults.Rows.Count > 0)
+            return Specs_Fail($"Unit '{code}' is a variant of '{GetString(baseOf.DTResults.Rows[0], "UM_TO").Trim()}'. Use the base unit.");
+
+        int written = 0;
+        var result = await _db.ExecuteInTransactionAsync(async (tx, ct) =>
+        {
+            written = await Specs_AllowUnitWithVariantsAsync(key, code, userRequester, tx, ct, reenable: true);
+        }, cancellationToken);
+
+        if (result.Success) result.RecordsAffected = written;
+        return result;
+    }
+
+    /// <summary>
+    /// Soft-deletes an allowed unit (it disappears from the picking list). The default UM of the
+    /// parameter cannot be disabled. Rows of CIR / MATNR already using it keep it; their number is
+    /// reported in Message.
+    /// </summary>
+    public async Task<SqlActionResult> Specs_DisableParameterUnit(
+        string keyParameter, string umCode,
+        string userRequester = "System", CancellationToken cancellationToken = default)
+    {
+        if (Specs_ValidateKey(keyParameter, "Parameter key", out var key) is { } e1) return Specs_Fail(e1);
+        if (Specs_ValidateUnitCode(umCode, "Unit code", out var code, SPECS_LEN_UM_CODE) is { } e2) return Specs_Fail(e2);
+        if (await Specs_CatalogPermissionAsync(userRequester, cancellationToken) is { } e3) return Specs_Fail(e3);
+
+        var state = await Specs_RequireExistsAsync(SQL_PARUM_STATE, () => P2("@k", key, "@u", code), $"Unit '{code}' for parameter '{key}'", cancellationToken);
+        if (state.Error is { } e4) return Specs_Fail(e4);
+        if (state.IsDeleted) return Specs_NoChange($"Unit '{code}' for parameter '{key}' is already disabled.");
+
+        var dq = await _db.SelectAsync(
+            "SELECT PARAMETER_DEFAULT_UM FROM dbo.MAS_SPEC_PARAMETER WHERE KEY_PARAMETER = @k",
+            P("@k", key), cancellationToken);
+        if (!dq.Success || dq.DTResults == null || dq.DTResults.Rows.Count == 0)
+            return Specs_Fail($"Error reading parameter '{key}': {dq.Message}");
+        if (string.Equals(GetString(dq.DTResults.Rows[0], "PARAMETER_DEFAULT_UM").Trim(), code, StringComparison.Ordinal))
+            return Specs_Fail($"Unit '{code}' is the default UM of parameter '{key}'. Change the default UM first.");
+
+        var uq = await _db.SelectAsync(@"
+            SELECT (SELECT COUNT(*) FROM dbo.MAS_SPEC_CIR_PARAMETERS   WHERE KEY_PARAMETER = @k AND UM_PARAMETER = @u AND IS_DELETED = 0)
+                 + (SELECT COUNT(*) FROM dbo.MAS_SPEC_MATNR_PARAMETERS WHERE KEY_PARAMETER = @k AND UM_PARAMETER = @u AND IS_DELETED = 0)",
+            P2("@k", key, "@u", code), cancellationToken);
+        if (!uq.Success || uq.DTResults == null || uq.DTResults.Rows.Count == 0)
+            return Specs_Fail($"Error: {uq.Message}");
+        var inUse = Convert.ToInt32(uq.DTResults.Rows[0][0]);
+
+        var r = await Specs_SetParameterUnitDeletedAsync(key, code, true, userRequester, cancellationToken);
+        if (r.Success && inUse > 0)
+            r.Message = $"Unit '{code}' disabled for parameter '{key}'. {inUse} CIR / MATNR row(s) still use it and keep it.";
+        return r;
+    }
+
+    /// <summary>Reactivates an allowed unit. Parameter and unit must be active.</summary>
+    public async Task<SqlActionResult> Specs_EnableParameterUnit(
+        string keyParameter, string umCode,
+        string userRequester = "System", CancellationToken cancellationToken = default)
+    {
+        if (Specs_ValidateKey(keyParameter, "Parameter key", out var key) is { } e1) return Specs_Fail(e1);
+        if (Specs_ValidateUnitCode(umCode, "Unit code", out var code, SPECS_LEN_UM_CODE) is { } e2) return Specs_Fail(e2);
+        if (await Specs_CatalogPermissionAsync(userRequester, cancellationToken) is { } e3) return Specs_Fail(e3);
+
+        var state = await Specs_RequireExistsAsync(SQL_PARUM_STATE, () => P2("@k", key, "@u", code), $"Unit '{code}' for parameter '{key}'", cancellationToken);
+        if (state.Error is { } e4) return Specs_Fail(e4);
+        if (!state.IsDeleted) return Specs_NoChange($"Unit '{code}' for parameter '{key}' is already active.");
+
+        if (await Specs_RequireActiveAsync(SQL_PARAM_STATE, () => P("@k", key), $"Parameter '{key}'", cancellationToken) is { } e5) return Specs_Fail(e5);
+        if (await Specs_RequireActiveAsync(SQL_UM_STATE, () => P("@k", code), $"Unit '{code}'", cancellationToken) is { } e6) return Specs_Fail(e6);
+
+        return await Specs_SetParameterUnitDeletedAsync(key, code, false, userRequester, cancellationToken);
+    }
+
+    /// <summary>
+    /// UM_PARAMETER picking list of every parameter row of one CIR or one MATNR, keyed by KEY_PARAMETER:
+    /// active allowed units (MAS_SPEC_PARAMETER_UM active + MAS_SPEC_UM active), default UM first, then by code.
+    /// The current UM_PARAMETER is always included; if it is no longer allowed it comes with IsActive = false.
+    /// <paramref name="sourceTable"/> / <paramref name="sourceWhere"/> are internal constants (never user input),
+    /// aliased "c"; values go through <paramref name="parameters"/>.
+    /// </summary>
+    private async Task<(Dictionary<string, List<SPEC_UNIT_OPTION>> Options, string? Error)> Specs_LoadUnitOptionsAsync(
+        string sourceTable, string sourceWhere, Func<SqlParameter[]> parameters, CancellationToken ct)
+    {
+        string sql = $@"
+            SELECT c.KEY_PARAMETER, a.UM_CODE, u.UM_DESCRIPTION,
+                   CASE WHEN a.UM_CODE = p.PARAMETER_DEFAULT_UM THEN 1 ELSE 0 END AS IS_DEFAULT,
+                   1 AS IS_ACTIVE
+            FROM   {sourceTable} c
+            JOIN   dbo.MAS_SPEC_PARAMETER    p ON p.KEY_PARAMETER = c.KEY_PARAMETER
+            JOIN   dbo.MAS_SPEC_PARAMETER_UM a ON a.KEY_PARAMETER = c.KEY_PARAMETER AND a.IS_DELETED = 0
+            JOIN   dbo.MAS_SPEC_UM           u ON u.UM_CODE = a.UM_CODE AND u.IS_DELETED = 0
+            WHERE  {sourceWhere} AND c.IS_DELETED = 0
+            UNION ALL
+            -- current UM_PARAMETER no longer selectable: shown so the UI can display the stored value
+            SELECT c.KEY_PARAMETER, c.UM_PARAMETER, ISNULL(u.UM_DESCRIPTION, N''),
+                   CASE WHEN c.UM_PARAMETER = p.PARAMETER_DEFAULT_UM THEN 1 ELSE 0 END,
+                   0
+            FROM   {sourceTable} c
+            JOIN   dbo.MAS_SPEC_PARAMETER p ON p.KEY_PARAMETER = c.KEY_PARAMETER
+            LEFT JOIN dbo.MAS_SPEC_UM  u ON u.UM_CODE = c.UM_PARAMETER
+            WHERE  {sourceWhere} AND c.IS_DELETED = 0
+              AND  NOT EXISTS (SELECT 1
+                               FROM   dbo.MAS_SPEC_PARAMETER_UM a
+                               JOIN   dbo.MAS_SPEC_UM ua ON ua.UM_CODE = a.UM_CODE AND ua.IS_DELETED = 0
+                               WHERE  a.KEY_PARAMETER = c.KEY_PARAMETER AND a.UM_CODE = c.UM_PARAMETER AND a.IS_DELETED = 0)
+            ORDER BY 1, 4 DESC, 2";
+
+        var q = await _db.SelectAsync(sql, parameters(), ct);
+        if (!q.Success || q.DTResults == null) return (new(), $"Error reading allowed units: {q.Message}");
+
+        var options = new Dictionary<string, List<SPEC_UNIT_OPTION>>(StringComparer.OrdinalIgnoreCase);
+        foreach (DataRow row in q.DTResults.Rows)
+        {
+            var key = GetString(row, "KEY_PARAMETER").Trim();
+            if (!options.TryGetValue(key, out var list)) options[key] = list = [];
+            list.Add(new SPEC_UNIT_OPTION
+            {
+                UmCode        = GetString(row, "UM_CODE").Trim(),
+                UmDescription = GetString(row, "UM_DESCRIPTION").Trim(),
+                IsDefault     = Convert.ToInt32(row["IS_DEFAULT"]) == 1,
+                IsActive      = Convert.ToInt32(row["IS_ACTIVE"]) == 1
+            });
+        }
+        return (options, null);
+    }
+
+    /// <summary>
+    /// Validates a UM_PARAMETER chosen in the UI: an unchanged value is always accepted; a changed one must be an
+    /// active option of the picking list (case-sensitive). Returns the error text or null.
+    /// </summary>
+    private static string? Specs_ValidateUmParameter(string key, string newUm, string currentUm, List<SPEC_UNIT_OPTION>? options)
+    {
+        if (string.Equals(newUm, currentUm, StringComparison.Ordinal)) return null;
+        var active = (options ?? []).Where(o => o.IsActive).Select(o => o.UmCode).ToList();
+        if (active.Contains(newUm, StringComparer.Ordinal)) return null;
+        return $"Parameter '{key}': unit '{newUm}' is not an allowed unit" +
+               (active.Count > 0 ? $" (allowed: {string.Join(", ", active)})." : " (no allowed units).");
+    }
+
+    private const int    SPECS_LEN_UM_PARAMETER = 20;     // UM / UM_PARAMETER nvarchar(20) in CIR and MATNR
+    private const string SPECS_UM_TBD           = "TBD";  // safety fallback when a parameter has no default UM
+
+    /// <summary>
+    /// Import rule for units (model B, CIR and SPECS). Returns
+    ///   um          = unit as written in the document (null = keep the DB value; truncated to 20 chars),
+    ///   umParameter = ALWAYS the default UM of the parameter ("TBD" if it has none).
+    /// Every difference between the document unit and the default UM is added to <paramref name="warnings"/>
+    /// so an engineer can review the value. Never fails.
+    /// </summary>
+    private static (string? um, string umParameter) Specs_ResolveImportUnit(
+        string key, string? documentUnit, string? defaultUm, IEnumerable<string> allowedUnits, List<string> warnings)
+    {
+        var umParameter = string.IsNullOrWhiteSpace(defaultUm) ? null : defaultUm.Trim();
+        if (umParameter == null)
+        {
+            umParameter = SPECS_UM_TBD;
+            warnings.Add($"Parameter '{key}': no default unit of measure in the master — UM_PARAMETER set to '{SPECS_UM_TBD}'.");
+        }
+
+        var docUnit = string.IsNullOrWhiteSpace(documentUnit) ? null : documentUnit.Trim();
+        if (docUnit == null) return (null, umParameter);
+
+        var um = docUnit;
+        if (docUnit.Length > SPECS_LEN_UM_PARAMETER)
+        {
+            um = docUnit[..SPECS_LEN_UM_PARAMETER];
+            warnings.Add($"Parameter '{key}': document unit '{docUnit}' exceeds {SPECS_LEN_UM_PARAMETER} characters — stored as '{um}'.");
+        }
+
+        if (!string.Equals(docUnit, umParameter, StringComparison.Ordinal))
+        {
+            warnings.Add(allowedUnits.Contains(docUnit, StringComparer.Ordinal)
+                ? $"Parameter '{key}': document unit '{docUnit}' differs from the parameter unit '{umParameter}' — review the value."
+                : $"Parameter '{key}': document unit '{docUnit}' is not a recognised unit for this parameter (parameter unit '{umParameter}') — review the value.");
+        }
+
+        return (um, umParameter);
+    }
+
+    private async Task<SqlActionResult> Specs_SetParameterUnitDeletedAsync(
+        string key, string code, bool deleted, string userRequester, CancellationToken ct)
+        => await _db.NonQueryAsync(@"
+            UPDATE dbo.MAS_SPEC_PARAMETER_UM
+            SET    IS_DELETED = @del, MODIFIED_BY = @user, MODIFIED_DATE = SYSDATETIME()
+            WHERE  KEY_PARAMETER = @k AND UM_CODE = @u",
+            [new SqlParameter("@k", key), new SqlParameter("@u", code),
+             new SqlParameter("@del", deleted), new SqlParameter("@user", userRequester)], ct: ct);
+
+    /// <summary>
+    /// Inserts <paramref name="baseUm"/> and its active variants as allowed units of the parameter
+    /// (missing rows only); reenable = true also re-activates disabled ones. Must run inside a transaction.
+    /// Returns rows inserted + re-enabled.
+    /// </summary>
+    private async Task<int> Specs_AllowUnitWithVariantsAsync(
+        string key, string baseUm, string userRequester, SqlTransaction tx, CancellationToken ct, bool reenable = false)
+    {
+        const string units = @"
+            SELECT CAST(@base AS nvarchar(20)) COLLATE Latin1_General_100_CS_AS AS UM_CODE
+            UNION
+            SELECT c.UM_FROM
+            FROM   dbo.MAS_SPEC_UM_CONVERSION c
+            JOIN   dbo.MAS_SPEC_UM u ON u.UM_CODE = c.UM_FROM AND u.IS_DELETED = 0
+            WHERE  c.UM_TO = @base AND c.IS_DELETED = 0";
+
+        var ins = await _db.NonQueryAsync($@"
+            INSERT INTO dbo.MAS_SPEC_PARAMETER_UM (KEY_PARAMETER, UM_CODE, IS_DELETED, CREATED_BY)
+            SELECT @k, s.UM_CODE, 0, @user
+            FROM   ({units}) s
+            WHERE  NOT EXISTS (SELECT 1 FROM dbo.MAS_SPEC_PARAMETER_UM a
+                               WHERE a.KEY_PARAMETER = @k AND a.UM_CODE = s.UM_CODE)",
+            [new SqlParameter("@k", key), new SqlParameter("@base", baseUm), new SqlParameter("@user", userRequester)],
+            transaction: tx, ct: ct);
+        if (!ins.Success) throw new InvalidOperationException(ins.Message);
+        int written = ins.RecordsAffected;
+
+        if (reenable)
+        {
+            var upd = await _db.NonQueryAsync($@"
+                UPDATE a
+                SET    a.IS_DELETED = 0, a.MODIFIED_BY = @user, a.MODIFIED_DATE = SYSDATETIME()
+                FROM   dbo.MAS_SPEC_PARAMETER_UM a
+                JOIN   ({units}) s ON s.UM_CODE = a.UM_CODE
+                WHERE  a.KEY_PARAMETER = @k AND a.IS_DELETED = 1",
+                [new SqlParameter("@k", key), new SqlParameter("@base", baseUm), new SqlParameter("@user", userRequester)],
+                transaction: tx, ct: ct);
+            if (!upd.Success) throw new InvalidOperationException(upd.Message);
+            written += upd.RecordsAffected;
+        }
+
+        return written;
+    }
+
+    // ══ List values of a parameter (MAS_SPEC_PARAMETER_VALUE) ════════════════════════
+
+    private const int SPECS_LEN_VALUE_CODE = 50;    // MAS_SPEC_PARAMETER_VALUE.VALUE_CODE nvarchar(50) — fits CIR VALUE_TYP_TEXT
+    private const int SPECS_LEN_VALUE_DESC = 200;   // VALUE_DESCRIPTION nvarchar(200)
+
+    /// <summary>
+    /// Possible values of list parameters (or of one parameter), ordered by parameter, SORT_ORDER, code.
+    /// includeDeleted = false returns only the values usable in the picking list.
+    /// </summary>
+    public async Task<OperationResult<List<SPEC_LIST_VALUE>>> Specs_GetListValues(
+        string? keyParameter = null,
+        bool includeDeleted = false,
+        CancellationToken cancellationToken = default)
+    {
+        string sql = @"
+            SELECT v.KEY_PARAMETER, p.PARAMETER_NAME, v.VALUE_CODE, v.VALUE_DESCRIPTION, v.SORT_ORDER, v.IS_DELETED,
+                   v.CREATED_BY, v.CREATED_DATE, v.MODIFIED_BY, v.MODIFIED_DATE
+            FROM   dbo.MAS_SPEC_PARAMETER_VALUE v
+            JOIN   dbo.MAS_SPEC_PARAMETER p ON p.KEY_PARAMETER = v.KEY_PARAMETER
+            WHERE  1 = 1";
+        var parameters = new List<SqlParameter>();
+
+        if (keyParameter != null)
+        {
+            if (Specs_ValidateKey(keyParameter, "Parameter key", out var key) is { } e1)
+                return OperationResult<List<SPEC_LIST_VALUE>>.Fail(e1);
+            sql += " AND v.KEY_PARAMETER = @k";
+            parameters.Add(new SqlParameter("@k", key));
+        }
+        if (!includeDeleted) sql += " AND v.IS_DELETED = 0";
+        sql += " ORDER BY v.KEY_PARAMETER, v.SORT_ORDER, v.VALUE_CODE";
+
+        var q = await _db.SelectAsync(sql, parameters.ToArray(), cancellationToken);
+        if (!q.Success || q.DTResults == null)
+            return OperationResult<List<SPEC_LIST_VALUE>>.Fail($"Error: {q.Message}");
+
+        var list = new List<SPEC_LIST_VALUE>();
+        foreach (DataRow row in q.DTResults.Rows)
+            list.Add(new SPEC_LIST_VALUE
+            {
+                KeyParameter     = GetString(row, "KEY_PARAMETER").Trim(),
+                ParameterName    = GetString(row, "PARAMETER_NAME").Trim(),
+                ValueCode        = GetString(row, "VALUE_CODE").Trim(),
+                ValueDescription = GetString(row, "VALUE_DESCRIPTION").Trim(),
+                SortOrder        = GetInt(row, "SORT_ORDER"),
+                IsDeleted        = GetBoolean(row, "IS_DELETED"),
+                CreatedBy        = GetString(row, "CREATED_BY").Trim(),
+                CreatedDate      = GetDateTime(row, "CREATED_DATE"),
+                ModifiedBy       = GetString(row, "MODIFIED_BY").Trim(),
+                ModifiedDate     = row["MODIFIED_DATE"] is DateTime md ? md : null
+            });
+
+        return OperationResult<List<SPEC_LIST_VALUE>>.Ok(list);
+    }
+
+    /// <summary>
+    /// Adds a possible value to a list parameter. The parameter must be active and of type L.
+    /// The code keeps its spelling (it is the text stored in CIR / MATNR) and is unique per parameter
+    /// ignoring case. Empty description = the code.
+    /// </summary>
+    public async Task<SqlActionResult> Specs_AddListValue(
+        SPEC_LIST_VALUE value,
+        string userRequester = "System", CancellationToken cancellationToken = default)
+    {
+        if (value is null) return Specs_Fail("Value is required.");
+        if (Specs_ValidateKey(value.KeyParameter, "Parameter key", out var key) is { } e1) return Specs_Fail(e1);
+        if (Specs_ValidateUnitCode(value.ValueCode, "Value", out var code, SPECS_LEN_VALUE_CODE) is { } e2) return Specs_Fail(e2);
+        var desc = (value.ValueDescription ?? string.Empty).Trim();
+        if (desc.Length == 0) desc = code;
+        if (desc.Length > SPECS_LEN_VALUE_DESC) return Specs_Fail($"Description exceeds {SPECS_LEN_VALUE_DESC} characters.");
+        if (await Specs_CatalogPermissionAsync(userRequester, cancellationToken) is { } e3) return Specs_Fail(e3);
+
+        if (await Specs_RequireActiveAsync(SQL_PARAM_STATE, () => P("@k", key), $"Parameter '{key}'", cancellationToken) is { } e4) return Specs_Fail(e4);
+        if (await Specs_RequireListParameterAsync(key, cancellationToken) is { } e5) return Specs_Fail(e5);
+        if (await Specs_RequireNewKeyAsync(SQL_PARVAL_STATE, () => P2("@k", key, "@v", code), $"Value '{code}' of parameter '{key}'", cancellationToken) is { } e6) return Specs_Fail(e6);
+
+        return await _db.NonQueryAsync(@"
+            INSERT INTO dbo.MAS_SPEC_PARAMETER_VALUE (KEY_PARAMETER, VALUE_CODE, VALUE_DESCRIPTION, SORT_ORDER, IS_DELETED, CREATED_BY)
+            VALUES (@k, @v, @d, @s, 0, @user)",
+            [new SqlParameter("@k", key), new SqlParameter("@v", code), new SqlParameter("@d", desc),
+             new SqlParameter("@s", value.SortOrder), new SqlParameter("@user", userRequester)], ct: cancellationToken);
+    }
+
+    /// <summary>
+    /// Updates description and sort order of a list value (identified by KeyParameter + ValueCode, case-insensitive).
+    /// The code itself cannot be renamed — it is the text stored in CIR / MATNR: add the new value and disable the old one.
+    /// </summary>
+    public async Task<SqlActionResult> Specs_UpdateListValue(
+        SPEC_LIST_VALUE value,
+        string userRequester = "System", CancellationToken cancellationToken = default)
+    {
+        if (value is null) return Specs_Fail("Value is required.");
+        if (Specs_ValidateKey(value.KeyParameter, "Parameter key", out var key) is { } e1) return Specs_Fail(e1);
+        if (Specs_ValidateUnitCode(value.ValueCode, "Value", out var code, SPECS_LEN_VALUE_CODE) is { } e2) return Specs_Fail(e2);
+        var desc = (value.ValueDescription ?? string.Empty).Trim();
+        if (desc.Length == 0) desc = code;
+        if (desc.Length > SPECS_LEN_VALUE_DESC) return Specs_Fail($"Description exceeds {SPECS_LEN_VALUE_DESC} characters.");
+        if (await Specs_CatalogPermissionAsync(userRequester, cancellationToken) is { } e3) return Specs_Fail(e3);
+
+        var state = await Specs_RequireExistsAsync(SQL_PARVAL_STATE, () => P2("@k", key, "@v", code), $"Value '{code}' of parameter '{key}'", cancellationToken);
+        if (state.Error is { } e4) return Specs_Fail(e4);
+
+        return await _db.NonQueryAsync(@"
+            UPDATE dbo.MAS_SPEC_PARAMETER_VALUE
+            SET    VALUE_DESCRIPTION = @d, SORT_ORDER = @s, MODIFIED_BY = @user, MODIFIED_DATE = SYSDATETIME()
+            WHERE  KEY_PARAMETER = @k AND VALUE_CODE = @v",
+            [new SqlParameter("@k", key), new SqlParameter("@v", code), new SqlParameter("@d", desc),
+             new SqlParameter("@s", value.SortOrder), new SqlParameter("@user", userRequester)], ct: cancellationToken);
+    }
+
+    /// <summary>
+    /// Soft-deletes a list value (it disappears from the picking list and a new reviewed value cannot use it).
+    /// CIR / MATNR rows already using it keep it; their number is reported in Message.
+    /// </summary>
+    public async Task<SqlActionResult> Specs_DisableListValue(
+        string keyParameter, string valueCode,
+        string userRequester = "System", CancellationToken cancellationToken = default)
+    {
+        if (Specs_ValidateKey(keyParameter, "Parameter key", out var key) is { } e1) return Specs_Fail(e1);
+        if (Specs_ValidateUnitCode(valueCode, "Value", out var code, SPECS_LEN_VALUE_CODE) is { } e2) return Specs_Fail(e2);
+        if (await Specs_CatalogPermissionAsync(userRequester, cancellationToken) is { } e3) return Specs_Fail(e3);
+
+        var state = await Specs_RequireExistsAsync(SQL_PARVAL_STATE, () => P2("@k", key, "@v", code), $"Value '{code}' of parameter '{key}'", cancellationToken);
+        if (state.Error is { } e4) return Specs_Fail(e4);
+        if (state.IsDeleted) return Specs_NoChange($"Value '{code}' of parameter '{key}' is already disabled.");
+
+        var uq = await _db.SelectAsync(@"
+            SELECT (SELECT COUNT(*) FROM dbo.MAS_SPEC_CIR_PARAMETERS   WHERE KEY_PARAMETER = @k AND LTRIM(RTRIM(VALUE_TYP_TEXT)) = @v AND IS_DELETED = 0)
+                 + (SELECT COUNT(*) FROM dbo.MAS_SPEC_MATNR_PARAMETERS WHERE KEY_PARAMETER = @k AND LTRIM(RTRIM(VALUE_TEXT))     = @v AND IS_DELETED = 0)",
+            P2("@k", key, "@v", code), cancellationToken);
+        if (!uq.Success || uq.DTResults == null || uq.DTResults.Rows.Count == 0) return Specs_Fail($"Error: {uq.Message}");
+        var inUse = Convert.ToInt32(uq.DTResults.Rows[0][0]);
+
+        var r = await Specs_SetListValueDeletedAsync(key, code, true, userRequester, cancellationToken);
+        if (r.Success && inUse > 0)
+            r.Message = $"Value '{code}' disabled for parameter '{key}'. {inUse} CIR / MATNR row(s) still use it and keep it.";
+        return r;
+    }
+
+    /// <summary>Reactivates a list value. The parameter must be active and of type L.</summary>
+    public async Task<SqlActionResult> Specs_EnableListValue(
+        string keyParameter, string valueCode,
+        string userRequester = "System", CancellationToken cancellationToken = default)
+    {
+        if (Specs_ValidateKey(keyParameter, "Parameter key", out var key) is { } e1) return Specs_Fail(e1);
+        if (Specs_ValidateUnitCode(valueCode, "Value", out var code, SPECS_LEN_VALUE_CODE) is { } e2) return Specs_Fail(e2);
+        if (await Specs_CatalogPermissionAsync(userRequester, cancellationToken) is { } e3) return Specs_Fail(e3);
+
+        var state = await Specs_RequireExistsAsync(SQL_PARVAL_STATE, () => P2("@k", key, "@v", code), $"Value '{code}' of parameter '{key}'", cancellationToken);
+        if (state.Error is { } e4) return Specs_Fail(e4);
+        if (!state.IsDeleted) return Specs_NoChange($"Value '{code}' of parameter '{key}' is already active.");
+
+        if (await Specs_RequireActiveAsync(SQL_PARAM_STATE, () => P("@k", key), $"Parameter '{key}'", cancellationToken) is { } e5) return Specs_Fail(e5);
+        if (await Specs_RequireListParameterAsync(key, cancellationToken) is { } e6) return Specs_Fail(e6);
+
+        return await Specs_SetListValueDeletedAsync(key, code, false, userRequester, cancellationToken);
+    }
+
+    private async Task<SqlActionResult> Specs_SetListValueDeletedAsync(
+        string key, string code, bool deleted, string userRequester, CancellationToken ct)
+        => await _db.NonQueryAsync(@"
+            UPDATE dbo.MAS_SPEC_PARAMETER_VALUE
+            SET    IS_DELETED = @del, MODIFIED_BY = @user, MODIFIED_DATE = SYSDATETIME()
+            WHERE  KEY_PARAMETER = @k AND VALUE_CODE = @v",
+            [new SqlParameter("@k", key), new SqlParameter("@v", code),
+             new SqlParameter("@del", deleted), new SqlParameter("@user", userRequester)], ct: ct);
+
+    private async Task<string?> Specs_RequireListParameterAsync(string key, CancellationToken ct)
+    {
+        var q = await _db.SelectAsync("SELECT VALUE_TYPE FROM dbo.MAS_SPEC_PARAMETER WHERE KEY_PARAMETER = @k", P("@k", key), ct);
+        if (!q.Success || q.DTResults == null || q.DTResults.Rows.Count == 0) return $"Error reading parameter '{key}': {q.Message}";
+        var vt = Specs_NormValueType(GetString(q.DTResults.Rows[0], "VALUE_TYPE"));
+        return vt == SPECS_VT_LIST ? null : $"Parameter '{key}' is of type '{vt}', not a list parameter (L). Change its type first.";
+    }
+
+    // ══ Text values — shared helpers (CIR + SPECS) ═══════════════════════════════════
+    //
+    //  Review rules (same as triggers TR_MATNR_PRM_VALIDATE / TR_CIR_PRM_VALIDATE):
+    //    DOC rows (read from the document) are never restricted.
+    //    A row that becomes MANUAL, or a MANUAL row whose values change, must comply:
+    //      N → numbers only (no text) · L → text = active list value, no numbers · T → text only, no numbers.
+
+    private const string SPECS_VT_NUMERIC = "N";
+    private const string SPECS_VT_LIST    = "L";
+    private const string SPECS_VT_TEXT    = "T";
+
+    /// <summary>DB value → N / L / T (anything else, NULL included, is numeric).</summary>
+    private static string Specs_NormValueType(string? value)
+    {
+        var v = (value ?? string.Empty).Trim().ToUpperInvariant();
+        return v is SPECS_VT_LIST or SPECS_VT_TEXT ? v : SPECS_VT_NUMERIC;
+    }
+
+    private static string? Specs_ValidateValueType(string? value, string whenEmpty, out string normalized)
+    {
+        normalized = (value ?? string.Empty).Trim().ToUpperInvariant();
+        if (normalized.Length == 0) { normalized = whenEmpty; return null; }
+        return normalized is SPECS_VT_NUMERIC or SPECS_VT_LIST or SPECS_VT_TEXT
+            ? null
+            : $"Value type '{value}' is not valid. Allowed: N (numeric), L (list), T (free text).";
+    }
+
+    /// <summary>Option matching a text (trimmed, case-insensitive), or null. activeOnly = ignore disabled values.</summary>
+    private static SPEC_VALUE_OPTION? Specs_MatchListValue(string? text, IEnumerable<SPEC_VALUE_OPTION>? options, bool activeOnly)
+    {
+        var t = string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+        if (t == null || options == null) return null;
+        return options.FirstOrDefault(o => (!activeOnly || o.IsActive) && string.Equals(o.ValueCode, t, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Value picking list of every list parameter (VALUE_TYPE = 'L') of one CIR or one MATNR, keyed by KEY_PARAMETER:
+    /// active values ordered by SORT_ORDER, code; the current text is added with IsActive = false when it matches a
+    /// disabled value. <paramref name="sourceTable"/> / <paramref name="sourceWhere"/> / <paramref name="textColumn"/> are
+    /// internal constants (never user input), aliased "c"; values go through <paramref name="parameters"/>.
+    /// </summary>
+    private async Task<(Dictionary<string, List<SPEC_VALUE_OPTION>> Options, string? Error)> Specs_LoadValueOptionsAsync(
+        string sourceTable, string sourceWhere, string textColumn, Func<SqlParameter[]> parameters, CancellationToken ct)
+    {
+        string sql = $@"
+            SELECT c.KEY_PARAMETER, v.VALUE_CODE, v.VALUE_DESCRIPTION, v.SORT_ORDER, 1 AS IS_ACTIVE
+            FROM   {sourceTable} c
+            JOIN   dbo.MAS_SPEC_PARAMETER       p ON p.KEY_PARAMETER = c.KEY_PARAMETER AND p.VALUE_TYPE = N'L'
+            JOIN   dbo.MAS_SPEC_PARAMETER_VALUE v ON v.KEY_PARAMETER = c.KEY_PARAMETER AND v.IS_DELETED = 0
+            WHERE  {sourceWhere} AND c.IS_DELETED = 0
+            UNION ALL
+            -- current value disabled in the list: shown so the UI can display the stored value
+            SELECT c.KEY_PARAMETER, v.VALUE_CODE, v.VALUE_DESCRIPTION, v.SORT_ORDER, 0
+            FROM   {sourceTable} c
+            JOIN   dbo.MAS_SPEC_PARAMETER       p ON p.KEY_PARAMETER = c.KEY_PARAMETER AND p.VALUE_TYPE = N'L'
+            JOIN   dbo.MAS_SPEC_PARAMETER_VALUE v ON v.KEY_PARAMETER = c.KEY_PARAMETER AND v.IS_DELETED = 1
+                                                 AND v.VALUE_CODE = LTRIM(RTRIM(c.{textColumn}))
+            WHERE  {sourceWhere} AND c.IS_DELETED = 0
+            ORDER BY 1, 4, 2";
+
+        var q = await _db.SelectAsync(sql, parameters(), ct);
+        if (!q.Success || q.DTResults == null) return (new(), $"Error reading list values: {q.Message}");
+
+        var options = new Dictionary<string, List<SPEC_VALUE_OPTION>>(StringComparer.OrdinalIgnoreCase);
+        foreach (DataRow row in q.DTResults.Rows)
+        {
+            var key = GetString(row, "KEY_PARAMETER").Trim();
+            if (!options.TryGetValue(key, out var list)) options[key] = list = [];
+            list.Add(new SPEC_VALUE_OPTION
+            {
+                ValueCode        = GetString(row, "VALUE_CODE").Trim(),
+                ValueDescription = GetString(row, "VALUE_DESCRIPTION").Trim(),
+                SortOrder        = GetInt(row, "SORT_ORDER"),
+                IsActive         = Convert.ToInt32(row["IS_ACTIVE"]) == 1
+            });
+        }
+        return (options, null);
+    }
+
+    /// <summary>Active list values of every list parameter, keyed by KEY_PARAMETER (import normalisation).</summary>
+    private async Task<(Dictionary<string, List<SPEC_VALUE_OPTION>> Values, string? Error)> Specs_LoadActiveListValuesAsync(CancellationToken ct)
+    {
+        var q = await _db.SelectAsync(@"
+            SELECT v.KEY_PARAMETER, v.VALUE_CODE, v.VALUE_DESCRIPTION, v.SORT_ORDER
+            FROM   dbo.MAS_SPEC_PARAMETER_VALUE v
+            JOIN   dbo.MAS_SPEC_PARAMETER p ON p.KEY_PARAMETER = v.KEY_PARAMETER AND p.VALUE_TYPE = N'L'
+            WHERE  v.IS_DELETED = 0
+            ORDER BY v.KEY_PARAMETER, v.SORT_ORDER, v.VALUE_CODE", null, ct);
+        if (!q.Success || q.DTResults == null) return (new(), $"Error reading list values: {q.Message}");
+
+        var values = new Dictionary<string, List<SPEC_VALUE_OPTION>>(StringComparer.OrdinalIgnoreCase);
+        foreach (DataRow row in q.DTResults.Rows)
+        {
+            var key = GetString(row, "KEY_PARAMETER").Trim();
+            if (!values.TryGetValue(key, out var list)) values[key] = list = [];
+            list.Add(new SPEC_VALUE_OPTION
+            {
+                ValueCode        = GetString(row, "VALUE_CODE").Trim(),
+                ValueDescription = GetString(row, "VALUE_DESCRIPTION").Trim(),
+                SortOrder        = GetInt(row, "SORT_ORDER")
+            });
+        }
+        return (values, null);
+    }
+
+    /// <summary>
+    /// Import rule for the typical text (CIR and SPECS). Never fails; problems become warnings for the engineer.
+    ///   L: text matching an active list value (trimmed, case-insensitive) → stored with the list spelling;
+    ///      otherwise stored as read + warning.
+    ///   N: text kept as read + warning (the engineer must convert it to a number).
+    ///   T: kept as read.
+    /// Longer than <paramref name="maxLength"/> → truncated + warning.
+    /// </summary>
+    private static string? Specs_ResolveImportText(
+        string key, string valueType, string? documentText, List<SPEC_VALUE_OPTION>? activeValues, int maxLength, List<string> warnings)
+    {
+        var text = string.IsNullOrWhiteSpace(documentText) ? null : documentText.Trim();
+        if (text == null) return null;
+
+        if (valueType == SPECS_VT_LIST)
+        {
+            if (Specs_MatchListValue(text, activeValues, activeOnly: true) is { } match) return match.ValueCode;
+            warnings.Add($"Parameter '{key}': document value '{text}' is not in the value list — the engineer must choose a value.");
+        }
+        else if (valueType == SPECS_VT_NUMERIC)
+            warnings.Add($"Parameter '{key}': numeric parameter received the text '{text}' — the engineer must convert it to a number.");
+
+        if (text.Length > maxLength)
+        {
+            var cut = text[..maxLength];
+            warnings.Add($"Parameter '{key}': document text exceeds {maxLength} characters — stored as '{cut}'.");
+            text = cut;
+        }
+        return text;
+    }
+
+    /// <summary>
+    /// Review rules for a row that will be written as MANUAL (see header of this section). Returns the error text or
+    /// null; <paramref name="normalizedText"/> = text with the list spelling for L parameters.
+    /// <paramref name="allowInactive"/> = true when the row is already MANUAL and its values do not change
+    /// (a value disabled later in the list is then accepted, same as the trigger).
+    /// </summary>
+    private static string? Specs_ValidateReviewedValue(
+        string label, string valueType, decimal? min, decimal? typ, decimal? max, string? text,
+        List<SPEC_VALUE_OPTION>? options, bool allowInactive, out string? normalizedText)
+    {
+        normalizedText = string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+        bool hasNumber = min.HasValue || typ.HasValue || max.HasValue;
+
+        switch (valueType)
+        {
+            case SPECS_VT_LIST:
+                if (hasNumber) return $"{label}: list parameter — numeric values are not allowed.";
+                if (normalizedText == null) return null;
+                var match = Specs_MatchListValue(normalizedText, options, activeOnly: !allowInactive);
+                if (match == null)
+                {
+                    var active = (options ?? []).Where(o => o.IsActive).Select(o => o.ValueCode).ToList();
+                    return $"{label}: '{normalizedText}' is not an active value of the list" +
+                           (active.Count > 0 ? $" (allowed: {string.Join(", ", active)})." : " (the list is empty).");
+                }
+                normalizedText = match.ValueCode;
+                return null;
+
+            case SPECS_VT_TEXT:
+                return hasNumber ? $"{label}: text parameter — numeric values are not allowed." : null;
+
+            default:
+                return normalizedText != null
+                    ? $"{label}: numeric parameter — convert the text '{normalizedText}' to a number (or clear it) before saving."
+                    : null;
+        }
+    }
+
+    /// <summary>
+    /// SQL predicate "the parameter row is informed", by VALUE_TYPE (mandatory coverage / CIR auto-close):
+    ///   N → MIN, TYP or MAX · L → text that exists in the list (active or disabled) · T → any text.
+    /// <paramref name="p"/> = alias of the CIR / MATNR parameter row, <paramref name="mp"/> = alias of MAS_SPEC_PARAMETER
+    /// (may come from a LEFT JOIN), <paramref name="textColumn"/> = VALUE_TEXT / VALUE_TYP_TEXT. Internal constants only.
+    /// </summary>
+    private static string Specs_SqlIsInformed(string p, string mp, string textColumn) => $@"(
+           (ISNULL({mp}.VALUE_TYPE, N'N') NOT IN (N'L', N'T') AND COALESCE({p}.VALUE_MIN, {p}.VALUE_TYP, {p}.VALUE_MAX) IS NOT NULL)
+        OR ({mp}.VALUE_TYPE = N'T' AND NULLIF(LTRIM(RTRIM({p}.{textColumn})), N'') IS NOT NULL)
+        OR ({mp}.VALUE_TYPE = N'L' AND EXISTS (SELECT 1 FROM dbo.MAS_SPEC_PARAMETER_VALUE lv
+                                               WHERE lv.KEY_PARAMETER = {p}.KEY_PARAMETER
+                                                 AND lv.VALUE_CODE = LTRIM(RTRIM({p}.{textColumn})))))";
+
+    /// <summary>C# version of <see cref="Specs_SqlIsInformed"/> (options = picking list incl. disabled current value).</summary>
+    private static bool Specs_IsInformed(string valueType, decimal? min, decimal? typ, decimal? max, string? text, List<SPEC_VALUE_OPTION>? options)
+        => valueType switch
+        {
+            SPECS_VT_LIST => Specs_MatchListValue(text, options, activeOnly: false) != null,
+            SPECS_VT_TEXT => !string.IsNullOrWhiteSpace(text),
+            _             => min.HasValue || typ.HasValue || max.HasValue
+        };
+
     // ══ Private helpers — catalog ════════════════════════════════════════════════════
 
     // State lookups: return a single IS_DELETED column (0 rows = does not exist)
@@ -1027,6 +1845,8 @@ public partial class Class_Projects_Quality_Gates
     private const string SQL_FAM_STATE        = "SELECT IS_DELETED FROM dbo.MAS_SPEC_FAMILY WHERE CAT_KEY = @c AND FAM_KEY = @f";
     private const string SQL_FAM_BY_KEY_STATE = "SELECT TOP 1 IS_DELETED FROM dbo.MAS_SPEC_FAMILY WHERE FAM_KEY = @f ORDER BY IS_DELETED";
     private const string SQL_FVP_STATE        = "SELECT IS_DELETED FROM dbo.MAS_SPEC_FAMILY_VS_PARAMETER WHERE FAM_KEY = @f AND KEY_PARAMETER = @k";
+    private const string SQL_PARUM_STATE      = "SELECT IS_DELETED FROM dbo.MAS_SPEC_PARAMETER_UM WHERE KEY_PARAMETER = @k AND UM_CODE = @u";  // UM_CODE is CS
+    private const string SQL_PARVAL_STATE     = "SELECT IS_DELETED FROM dbo.MAS_SPEC_PARAMETER_VALUE WHERE KEY_PARAMETER = @k AND VALUE_CODE = @v";  // VALUE_CODE is CI
 
     // Fresh SqlParameter arrays on every call — a SqlParameter cannot be shared between commands
     private static SqlParameter[] P(string n, object v) => [new SqlParameter(n, v)];

@@ -12,7 +12,11 @@ namespace QUALITY_GATES.Classes;
 
 // ── Models — SPECS ─────────────────────────────────────────────────────────────────────
 
-/// <summary>One parameter criterion in a parametric search: VALUE_TYP must fall in [ValueTypMin, ValueTypMax] (either bound optional).</summary>
+/// <summary>
+/// One criterion of the legacy parametric search (Specs_SearchProducts): a WITHIN filter of the Area 3 engine —
+/// TYP in [ValueTypMin, ValueTypMax] (without TYP, MIN–MAX overlaps), in the default UM of the parameter, either bound optional.
+/// New callers use SPEC_SEARCH_FILTER + Specs_SearchProductsAdvanced.
+/// </summary>
 public class SPEC_PARAM_FILTER
 {
     public string   KeyParameter { get; set; } = string.Empty;
@@ -136,166 +140,90 @@ public partial class Class_Projects_Quality_Gates
         return OperationResult<bool>.Ok(true);
     }
 
-    /// <summary>
-    /// Parametric search: returns all products of a family that match ALL supplied filters.
-    /// Each filter is an exact equality on a parameter value.
-    /// Passing an empty or null filter list returns every active product of the family.
-    /// Each result includes the full parameter list so the caller can render a comparison grid.
-    /// </summary>
-    public async Task<OperationResult<List<SPEC_SEARCH_RESULT>>> Specs_SearchProducts(
-        string catKey,
-        string famKey,
-        List<SPEC_PARAM_FILTER>? filters = null,
-        CancellationToken cancellationToken = default)
-    {
-        // One query returns header + all parameter rows for each matching product.
-        // IS_DELETED appears in both tables so it is aliased to avoid DataRow column-name collision.
-        // Structural variation (number of EXISTS clauses) is controlled by an integer index —
-        // all user-supplied values always flow through @parameterized placeholders, never concatenated.
-        var sb = new StringBuilder(@"
-            SELECT h.MATNR, h.EDITION, h.DESCRIPTION, h.PRODUCT_CATEGOTY, h.PRODUCT_FAMILY,
-                   h.SPEC_FILE_PATH, h.ISSUE_DATE, h.CREATED_BY, h.CREATED_DATE,
-                   h.IS_DELETED     AS HDR_DELETED,
-                   p.KEY_PARAMETER, p.VALUE_MAX, p.VALUE_TYP, p.VALUE_MIN, p.VALUE_TEXT,
-                   p.UM, p.MODIFIED_BY, p.MODIFIED_DATE,
-                   p.IS_DELETED     AS PRM_DELETED,
-                   mp.PARAMETER_NAME, mp.PARAMETER_DEFAULT_UM,
-                   fvp.TYPE_PARAMETER
-            FROM   dbo.MAS_SPEC_MATNR_HEADER h
-            JOIN   dbo.MAS_SPEC_MATNR_PARAMETERS p
-                     ON p.MATNR = h.MATNR AND p.EDITION = h.EDITION AND p.IS_DELETED = 0
-            JOIN   dbo.MAS_SPEC_PARAMETER mp
-                     ON mp.KEY_PARAMETER = p.KEY_PARAMETER
-            JOIN   dbo.MAS_SPEC_FAMILY_VS_PARAMETER fvp
-                     ON fvp.FAM_KEY = @famKey AND fvp.KEY_PARAMETER = p.KEY_PARAMETER
-            WHERE  h.PRODUCT_CATEGOTY = @catKey
-              AND  h.PRODUCT_FAMILY   = @famKey
-              AND  h.IS_DELETED = 0");
-
-        var paramList = new List<SqlParameter>
-        {
-            new SqlParameter("@catKey", catKey),
-            new SqlParameter("@famKey", famKey)
-        };
-
-        if (filters != null)
-        {
-            for (int i = 0; i < filters.Count; i++)
-            {
-                sb.Append($@"
-              AND EXISTS (
-                  SELECT 1 FROM dbo.MAS_SPEC_MATNR_PARAMETERS pf{i}
-                  WHERE  pf{i}.MATNR         = h.MATNR
-                    AND  pf{i}.EDITION       = h.EDITION
-                    AND  pf{i}.KEY_PARAMETER = @fKey{i}
-                    AND  (@fMin{i} IS NULL OR pf{i}.VALUE_TYP >= @fMin{i})
-                    AND  (@fMax{i} IS NULL OR pf{i}.VALUE_TYP <= @fMax{i})
-                    AND  pf{i}.IS_DELETED    = 0)");
-
-                paramList.Add(new SqlParameter($"@fKey{i}", filters[i].KeyParameter));
-                paramList.Add(new SqlParameter($"@fMin{i}", (object?)filters[i].ValueTypMin ?? DBNull.Value));
-                paramList.Add(new SqlParameter($"@fMax{i}", (object?)filters[i].ValueTypMax ?? DBNull.Value));
-            }
-        }
-
-        sb.Append(@"
-            ORDER BY h.MATNR, h.EDITION, fvp.TYPE_PARAMETER, mp.PARAMETER_NAME");
-
-        var q = await _db.SelectAsync(sb.ToString(), [.. paramList], cancellationToken);
-        if (!q.Success || q.DTResults == null)
-            return OperationResult<List<SPEC_SEARCH_RESULT>>.Fail($"Error: {q.Message}");
-
-        var resultList  = new List<SPEC_SEARCH_RESULT>();
-        var resultIndex = new Dictionary<(string, string), SPEC_SEARCH_RESULT>();
-
-        foreach (DataRow row in q.DTResults.Rows)
-        {
-            var matnr   = GetString(row, "MATNR");
-            var edition = GetString(row, "EDITION");
-            var key     = (matnr, edition);
-
-            if (!resultIndex.TryGetValue(key, out var entry))
-            {
-                entry = new SPEC_SEARCH_RESULT
-                {
-                    Header = new SPEC_MATNR_HEADER
-                    {
-                        Matnr           = matnr,
-                        Edition         = edition,
-                        Description     = GetString(row, "DESCRIPTION"),
-                        ProductCategory = GetString(row, "PRODUCT_CATEGOTY"),
-                        ProductFamily   = GetString(row, "PRODUCT_FAMILY"),
-                        SpecFilePath    = GetString(row, "SPEC_FILE_PATH"),
-                        IssueDate       = GetDateOnly(row, "ISSUE_DATE"),
-                        CreatedBy       = GetString(row, "CREATED_BY"),
-                        CreatedDate     = GetDateTime(row, "CREATED_DATE"),
-                        IsDeleted       = GetBoolean(row, "HDR_DELETED")
-                    }
-                };
-                resultIndex[key] = entry;
-                resultList.Add(entry);
-            }
-
-            entry.Parameters.Add(new SPEC_MATNR_PARAMETER
-            {
-                Matnr         = matnr,
-                Edition       = edition,
-                KeyParameter  = GetString(row, "KEY_PARAMETER"),
-                ParameterName = GetString(row, "PARAMETER_NAME"),
-                TypeParameter = GetString(row, "TYPE_PARAMETER"),
-                ValueMax      = GetDecimalNullable(row, "VALUE_MAX"),
-                ValueTyp      = GetDecimalNullable(row, "VALUE_TYP"),
-                ValueMin      = GetDecimalNullable(row, "VALUE_MIN"),
-                ValueText     = GetString(row, "VALUE_TEXT"),
-                Um            = GetString(row, "UM"),
-                DefaultUm     = GetString(row, "PARAMETER_DEFAULT_UM"),
-                ModifiedBy    = GetString(row, "MODIFIED_BY"),
-                ModifiedDate  = GetDateTime(row, "MODIFIED_DATE"),
-                IsDeleted     = GetBoolean(row, "PRM_DELETED")
-            });
-        }
-
-        return OperationResult<List<SPEC_SEARCH_RESULT>>.Ok(resultList);
-    }
-
     // ── Write — Products ──────────────────────────────────────────────────────
 
+    private const int SPECS_LEN_MATNR   = 18;   // MAS_SPEC_MATNR_HEADER.MATNR nchar(18)
+    private const int SPECS_LEN_EDITION = 10;   // MAS_SPEC_MATNR_HEADER.EDITION nchar(10)
+
     /// <summary>
-    /// Creates a new product header. Requires @SPECS permission.
-    /// Triggers auto-populate parameters (TR_MATNR_HDR_INIT_PARAMS) and audit (TR_MATNR_HDR_AUDIT).
+    /// Creates a new product (manual creation from scratch, also used by the JSON import). Requires @SPECS.
+    /// Validates: MATNR / EDITION / description required and within length, product not existing (active or
+    /// deleted), category active, family active and belonging to the category.
+    /// One transaction with the session user, so the audit rows carry the engineer:
+    ///   TR_MATNR_HDR_INIT_PARAMS creates one parameter row per active family parameter with UM = NULL and
+    ///   UM_PARAMETER = default UM of the parameter; the header audit trigger records the creation.
+    /// Then open the editor with Specs_GetProductDetail (parameters + UnitOptions picking list).
     /// </summary>
     public async Task<SqlActionResult> Specs_CreateProduct(
                                                             SPEC_MATNR_HEADER header,
                                                             string userRequester = "System",
                                                             CancellationToken cancellationToken = default)
     {
-        var perm = await Specs_CheckPermission(SPECS_KEY_PROCESS, userRequester, cancellationToken);
-        if (!perm.Success)
-            return new SqlActionResult { Success = false, Message = perm.ErrorMessage };
+        if (header is null) return Specs_Fail("Product header is required.");
 
-        const string sql = @"
-            INSERT INTO dbo.MAS_SPEC_MATNR_HEADER
-                (MATNR, EDITION, DESCRIPTION, PRODUCT_CATEGOTY, PRODUCT_FAMILY,
-                 SPEC_FILE_PATH, ISSUE_DATE, CREATED_BY)
-            VALUES
-                (@matnr, @edition, @description, @category, @family,
-                 @filePath, @issueDate, @createdBy)";
+        var matnr       = (header.Matnr ?? string.Empty).Trim();
+        var edition     = (header.Edition ?? string.Empty).Trim();
+        var description = (header.Description ?? string.Empty).Trim();
+        var filePath    = Specs_NullIfBlank(header.SpecFilePath);
 
-        return await _db.NonQueryAsync(sql,
-            new[]
-            {
-                new SqlParameter("@matnr",       header.Matnr),
-                new SqlParameter("@edition",     header.Edition),
-                new SqlParameter("@description", header.Description),
-                new SqlParameter("@category",    header.ProductCategory),
-                new SqlParameter("@family",      header.ProductFamily),
-                new SqlParameter("@filePath",    string.IsNullOrWhiteSpace(header.SpecFilePath)
-                                                     ? (object)DBNull.Value : header.SpecFilePath),
-                new SqlParameter("@issueDate",   header.IssueDate == DateOnly.MinValue
-                                                     ? (object)DBNull.Value
-                                                     : header.IssueDate.ToDateTime(TimeOnly.MinValue)),
-                new SqlParameter("@createdBy",   userRequester)
-            });
+        if (matnr.Length == 0)                         return Specs_Fail("MATNR is required.");
+        if (matnr.Length > SPECS_LEN_MATNR)            return Specs_Fail($"MATNR '{matnr}' exceeds {SPECS_LEN_MATNR} characters.");
+        if (edition.Length == 0)                       return Specs_Fail("Edition is required.");
+        if (edition.Length > SPECS_LEN_EDITION)        return Specs_Fail($"Edition '{edition}' exceeds {SPECS_LEN_EDITION} characters.");
+        if (description.Length == 0)                   return Specs_Fail("Description is required.");
+        if (description.Length > SPECS_LEN_DESCRIPTION) return Specs_Fail($"Description exceeds {SPECS_LEN_DESCRIPTION} characters.");
+        if ((filePath?.Length ?? 0) > SPECS_LEN_FILE_PATH) return Specs_Fail($"Spec file path exceeds {SPECS_LEN_FILE_PATH} characters.");
+        if (Specs_ValidateKey(header.ProductCategory, "Product category", out var cat) is { } eCat) return Specs_Fail(eCat);
+        if (Specs_ValidateKey(header.ProductFamily, "Product family", out var fam) is { } eFam)     return Specs_Fail(eFam);
+
+        if (await Specs_CatalogPermissionAsync(userRequester, cancellationToken) is { } ePerm) return Specs_Fail(ePerm);
+
+        var exists = await _db.SelectAsync(
+            "SELECT IS_DELETED FROM dbo.MAS_SPEC_MATNR_HEADER WHERE MATNR = @m AND EDITION = @e",
+            P2("@m", matnr, "@e", edition), cancellationToken);
+        if (!exists.Success || exists.DTResults == null) return Specs_Fail($"Error: {exists.Message}");
+        if (exists.DTResults.Rows.Count > 0)
+            return Specs_Fail(GetBoolean(exists.DTResults.Rows[0], "IS_DELETED")
+                ? $"Product '{matnr}/{edition}' already exists but is deleted. Enable it instead."
+                : $"Product '{matnr}/{edition}' already exists.");
+
+        if (await Specs_RequireActiveAsync(SQL_CAT_STATE, () => P("@k", cat), $"Category '{cat}'", cancellationToken) is { } eC)
+            return Specs_Fail(eC);
+        if (await Specs_RequireActiveAsync(SQL_FAM_STATE, () => P2("@c", cat, "@f", fam), $"Family '{fam}' of category '{cat}'", cancellationToken) is { } eF)
+            return Specs_Fail(eF);
+
+        int written = 0;
+        var result = await _db.ExecuteInTransactionAsync(async (tx, ct) =>
+        {
+            await Specs_SetSessionUserAsync(userRequester, tx, ct);   // CHANGED_BY of the header / parameter audit
+
+            var r = await _db.NonQueryAsync(@"
+                INSERT INTO dbo.MAS_SPEC_MATNR_HEADER
+                    (MATNR, EDITION, DESCRIPTION, PRODUCT_CATEGOTY, PRODUCT_FAMILY,
+                     SPEC_FILE_PATH, ISSUE_DATE, CREATED_BY)
+                VALUES
+                    (@matnr, @edition, @description, @category, @family,
+                     @filePath, @issueDate, @createdBy)",
+                new[]
+                {
+                    new SqlParameter("@matnr",       matnr),
+                    new SqlParameter("@edition",     edition),
+                    new SqlParameter("@description", description),
+                    new SqlParameter("@category",    cat),
+                    new SqlParameter("@family",      fam),
+                    new SqlParameter("@filePath",    (object?)filePath ?? DBNull.Value),
+                    new SqlParameter("@issueDate",   header.IssueDate == DateOnly.MinValue
+                                                         ? (object)DBNull.Value
+                                                         : header.IssueDate.ToDateTime(TimeOnly.MinValue)),
+                    new SqlParameter("@createdBy",   userRequester)
+                },
+                transaction: tx, ct: ct);
+            if (!r.Success) throw new InvalidOperationException(r.Message);
+            written = r.RecordsAffected;
+        }, cancellationToken);
+
+        if (result.Success) result.RecordsAffected = written;
+        return result;
     }
 
     // ── Import — JSON → MATNR tables ─────────────────────────────────────────
@@ -310,12 +238,19 @@ public partial class Class_Projects_Quality_Gates
     ///     (description, spec file path, issue date); manual header values are never overwritten.
     ///
     /// Parameter logic (per JSON entry):
-    ///   - value_typ is tried as decimal; on failure it goes to VALUE_TEXT.
+    ///   - value_typ: numeric parameter (VALUE_TYPE N) → tried as decimal, on failure VALUE_TEXT + warning;
+    ///     list / free-text parameter (L / T) → always VALUE_TEXT. List texts matching a list value
+    ///     (case-insensitive) are stored with the list spelling; otherwise stored as read + warning.
+    ///     Values are never restricted on import (DATA_SOURCE='DOC'); the engineer reviews them.
     ///   - Only active parameters of the product are updated; others are skipped and counted.
     ///   - Parameters with DATA_SOURCE='MANUAL' are NEVER overwritten (counted in ParametersProtected).
     ///   - Only values that really change are written, marked DATA_SOURCE='DOC'.
     ///   - Parameters in DB but absent from the JSON are left untouched.
-    ///   - UM: null/empty in JSON → existing DB value is preserved. Unknown UM → saved + warning.
+    ///   - UM (unit as written in the document): null/empty in JSON → existing DB value preserved;
+    ///     longer than 20 characters → truncated + warning.
+    ///   - UM_PARAMETER: ALWAYS the default UM of the parameter, even when the document unit differs
+    ///     (an engineer reviews it in the UI). Document unit ≠ default UM → warning. Unit problems never
+    ///     skip a parameter. MANUAL parameters are untouched (values and units).
     ///
     /// Requires @SPECS permission.
     /// </summary>
@@ -429,7 +364,7 @@ public partial class Class_Projects_Quality_Gates
         if (!current.Success)
             return OperationResult<SPEC_IMPORT_RESULT>.Fail($"Error reading existing parameters: {current.ErrorMessage}");
 
-        var dbKeys = new HashSet<string>(current.Data.Parameters.Select(p => p.KeyParameter), StringComparer.OrdinalIgnoreCase);
+        var valueTypes = current.Data.Parameters.ToDictionary(p => p.KeyParameter, p => p.ValueType, StringComparer.OrdinalIgnoreCase);
 
         // 7 — build batch update list from JSON parameters
         var updates = new List<SPEC_PARAM_UPDATE>();
@@ -440,7 +375,7 @@ public partial class Class_Projects_Quality_Gates
 
             var key = jp.KeyParameter.Trim();
 
-            if (!dbKeys.Contains(key))
+            if (!valueTypes.TryGetValue(key, out var valueType))
             {
                 result.ParametersSkipped++;
                 result.Warnings.Add($"Parameter '{key}' not found in DB for {matnr}/{edition} — skipped.");
@@ -453,13 +388,16 @@ public partial class Class_Projects_Quality_Gates
                 string.IsNullOrWhiteSpace(jp.Unit))
                 continue;
 
-            // value_typ: try numeric first, fall back to text
+            // value_typ: numeric parameter → try numeric first, fall back to text;
+            //            list / free-text parameter → always text (e.g. a ratio "14" stays text)
             decimal? valueTypNum  = null;
             string?  valueTypText = null;
 
             if (!string.IsNullOrWhiteSpace(jp.ValueTyp))
             {
-                if (decimal.TryParse(jp.ValueTyp,
+                if (valueType != SPECS_VT_NUMERIC)
+                    valueTypText = jp.ValueTyp.Trim();
+                else if (decimal.TryParse(jp.ValueTyp,
                         System.Globalization.NumberStyles.Any,
                         System.Globalization.CultureInfo.InvariantCulture,
                         out var parsed))
@@ -480,12 +418,7 @@ public partial class Class_Projects_Quality_Gates
         }
 
         // 8 — diff + protection of MANUAL values, then persist only real changes as DATA_SOURCE='DOC'
-        var units = await Specs_LoadActiveUnitsAsync(cancellationToken);
-        if (!units.Success)
-            return OperationResult<SPEC_IMPORT_RESULT>.Fail(units.ErrorMessage);
-
-        var plan = Specs_BuildParameterPlan(current.Data.Parameters, updates,
-                                            isImport: true, keepUmWhenEmpty: true, units.Data);
+        var plan = Specs_BuildParameterPlan(current.Data.Parameters, updates, isImport: true);
         result.Warnings.AddRange(plan.Warnings);
         result.ParametersProtected = plan.Protected;
         result.ParametersSkipped  += updates.Count - plan.Changes.Count - plan.Protected - plan.Unchanged;

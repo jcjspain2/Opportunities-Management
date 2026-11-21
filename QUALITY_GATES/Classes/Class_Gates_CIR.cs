@@ -55,23 +55,45 @@ public class CIR_PARAMETER
     public string    KeyParameter  { get; set; } = string.Empty;
     public string    ParameterName { get; set; } = string.Empty;  // MAS_SPEC_PARAMETER.PARAMETER_NAME
     public string    TypeParameter { get; set; } = string.Empty;  // M / O / I (MAS_SPEC_FAMILY_VS_PARAMETER)
+    public string    ValueType     { get; set; } = "N";           // N numeric · L list · T free text (MAS_SPEC_PARAMETER.VALUE_TYPE) — read only
     public string    DefaultUm     { get; set; } = string.Empty;  // PARAMETER_DEFAULT_UM
     public string    ParameterCategoryKey  { get; set; } = string.Empty;  // MAS_SPEC_PARAMETER.PARAMETER_CATEGORY
     public string    ParameterCategoryName { get; set; } = string.Empty;  // MAS_SPEC_PARAMETER_CATEGORY.CATEGORY_PAR_NAME
     public decimal?  ValueMin      { get; set; }
     public decimal?  ValueTyp      { get; set; }
-    public string?   ValueTypText  { get; set; }
+    public string?   ValueTypText  { get; set; }                  // L = a ValueOptions code
+    public List<SPEC_VALUE_OPTION> ValueOptions { get; set; } = []; // picking list for ValueTypText when ValueType = L (filled by CIR_GetDetail)
     public decimal?  ValueMax      { get; set; }
-    public string?   Um            { get; set; }
+    public string?   Um            { get; set; }                  // unit as written in the document — READ ONLY (never saved by CIR_SaveChanges)
+    public string    UmParameter   { get; set; } = string.Empty;  // UM_PARAMETER — unit of the value, edited with the picking list
+    public List<SPEC_UNIT_OPTION> UnitOptions { get; set; } = []; // picking list for UmParameter (filled by CIR_GetDetail)
     public string    DataSource    { get; set; } = string.Empty;  // 'DOC' | 'MANUAL'
     public string    ModifiedBy    { get; set; } = string.Empty;
     public DateTime? ModifiedDate  { get; set; }
 
     public bool IsMandatory => string.Equals(TypeParameter, "M", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>True if at least one of the 4 value fields is informed (UM does not count).</summary>
-    public bool HasValue => ValueMin.HasValue || ValueTyp.HasValue || ValueMax.HasValue
-                            || !string.IsNullOrWhiteSpace(ValueTypText);
+    /// <summary>True if the document unit differs from UM_PARAMETER — to be reviewed by an engineer.</summary>
+    public bool UmDiffers => !string.IsNullOrWhiteSpace(Um)
+                             && !string.Equals(Um.Trim(), UmParameter?.Trim(), StringComparison.Ordinal);
+
+    public bool IsManual => string.Equals(DataSource, "MANUAL", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Informed for the mandatory coverage / auto-close, by ValueType (UM does not count):
+    /// N → MIN/TYP/MAX · L → text in the list · T → text.</summary>
+    public bool HasValue => ValueType switch
+    {
+        "L" => ValueOptions.Any(o => string.Equals(o.ValueCode, ValueTypText?.Trim(), StringComparison.OrdinalIgnoreCase)),
+        "T" => !string.IsNullOrWhiteSpace(ValueTypText),
+        _   => ValueMin.HasValue || ValueTyp.HasValue || ValueMax.HasValue
+    };
+
+    /// <summary>List parameter whose text (from the document) is not a value of the list — the engineer must choose one.</summary>
+    public bool TextNotInList => ValueType == "L" && !string.IsNullOrWhiteSpace(ValueTypText) && !HasValue;
+
+    /// <summary>Value read from the document and not reviewed yet (DATA_SOURCE = DOC with some value or unit).</summary>
+    public bool NeedsReview => !IsManual && (ValueMin.HasValue || ValueTyp.HasValue || ValueMax.HasValue
+                                             || !string.IsNullOrWhiteSpace(ValueTypText) || !string.IsNullOrWhiteSpace(Um));
 }
 
 /// <summary>Full CIR for the UI: header + parameters + warnings + coverage + permission flags.</summary>
@@ -157,8 +179,16 @@ public partial class Class_Projects_Quality_Gates
     ///   - type_parameter='X' (client extras not in catalog) → skipped.
     ///   - Parameters absent from MAS_SPEC_CIR_PARAMETERS for that opportunity → skipped + warning.
     ///   - Parameters where all values are null/empty → skipped silently.
-    ///   - value_typ: tried as decimal (InvariantCulture); on failure goes to VALUE_TYP_TEXT.
-    ///   - UM: null/empty in JSON → existing DB value preserved (COALESCE in SQL).
+    ///   - value_typ: numeric parameter (VALUE_TYPE N) → tried as decimal (InvariantCulture), on failure
+    ///     VALUE_TYP_TEXT + IMPORT warning; list / free-text parameter (L / T) → always VALUE_TYP_TEXT.
+    ///     List texts matching a list value (case-insensitive) are stored with the list spelling, otherwise
+    ///     as read + warning; texts longer than 50 characters are truncated + warning. Never blocks.
+    ///   - UM (unit as written in the document): null/empty in JSON → existing DB value preserved
+    ///     (COALESCE in SQL); longer than 20 characters → truncated + warning.
+    ///   - UM_PARAMETER: ALWAYS the default UM of the parameter (MAS_SPEC_PARAMETER), even when the
+    ///     document unit differs — an engineer reviews it in the UI. Document unit different from the
+    ///     default UM (allowed variant or unknown unit) → IMPORT warning. Unit problems never block
+    ///     the import.
     ///   - DATA_SOURCE is always set to 'DOC' for all parameters updated by this process.
     ///
     /// Warnings logic per file (MAS_SPEC_CIR_WARNINGS):
@@ -298,6 +328,20 @@ public partial class Class_Projects_Quality_Gates
             if (parameters.Error != null)
                 return OperationResult<CIR_DETAIL>.Fail(parameters.Error);
 
+            // UM_PARAMETER picking list per parameter
+            var unitOptions = await CIR_LoadUnitOptionsAsync(oppLineId, cancellationToken);
+            if (unitOptions.Error != null)
+                return OperationResult<CIR_DETAIL>.Fail(unitOptions.Error);
+            foreach (var p in parameters.Parameters)
+                p.UnitOptions = unitOptions.Options.TryGetValue(p.KeyParameter, out var opts) ? opts : [];
+
+            // VALUE_TYP_TEXT picking list of the list parameters (needed before the coverage: HasValue uses it)
+            var valueOptions = await CIR_LoadValueOptionsAsync(oppLineId, cancellationToken);
+            if (valueOptions.Error != null)
+                return OperationResult<CIR_DETAIL>.Fail(valueOptions.Error);
+            foreach (var p in parameters.Parameters)
+                p.ValueOptions = valueOptions.Options.TryGetValue(p.KeyParameter, out var vopts) ? vopts : [];
+
             var warnings = await CIR_GetWarnings(oppLineId, cancellationToken);
             if (!warnings.Success)
                 return OperationResult<CIR_DETAIL>.Fail(warnings.ErrorMessage);
@@ -339,8 +383,14 @@ public partial class Class_Projects_Quality_Gates
     ///   3. userRequester is the RESPONSIBLE_USER_ID of the FORM_CIR deliverable (or "System").
     ///   4. CIR is open.  5. Every KeyParameter exists for the CIR (no new parameters are created).
     ///   6. No parameter has both ValueTyp and ValueTypText.  7. Text lengths fit the columns.
-    /// Only the parameters whose values differ from the DB are updated (DATA_SOURCE='MANUAL').
-    /// UM is saved as received ("" → NULL). A save with no changes does nothing (and does not close).
+    ///   8. A changed UmParameter must be an active allowed unit of the parameter (picking list,
+    ///      case-sensitive); an unchanged one is accepted even if it was disabled later.
+    ///   9. Review rules by value type on every changed row (it becomes MANUAL): N no text · L active list value
+    ///      (written with the list spelling), no numbers · T no numbers. Same rules as TR_CIR_PRM_VALIDATE.
+    /// Only the parameters whose values or UmParameter differ from the DB are updated (DATA_SOURCE='MANUAL');
+    /// the UM_PARAMETER change is audited by TR_CIR_PRM_AUDIT.
+    /// Um (unit as written in the document) is READ ONLY and never saved. Empty UmParameter keeps the DB value.
+    /// A save with no changes does nothing (and does not close).
     /// In the same transaction, if every mandatory parameter is informed the CIR is closed automatically.
     /// RecordsAffected = number of parameters updated. Message says if the CIR was closed.
     /// </summary>
@@ -367,6 +417,12 @@ public partial class Class_Projects_Quality_Gates
             var current = await CIR_LoadParametersAsync(oppLineId, cancellationToken);
             if (current.Error != null) return CIR_Fail(current.Error);
 
+            var unitOptions = await CIR_LoadUnitOptionsAsync(oppLineId, cancellationToken);
+            if (unitOptions.Error != null) return CIR_Fail(unitOptions.Error);
+
+            var valueOptions = await CIR_LoadValueOptionsAsync(oppLineId, cancellationToken);
+            if (valueOptions.Error != null) return CIR_Fail(valueOptions.Error);
+
             var dbByKey = current.Parameters.ToDictionary(p => p.KeyParameter, StringComparer.OrdinalIgnoreCase);
             var errors  = new List<string>();
             var seen    = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -379,21 +435,42 @@ public partial class Class_Projects_Quality_Gates
                 if (!seen.Add(key))             { errors.Add($"Parameter '{key}' is duplicated."); continue; }
                 if (!dbByKey.TryGetValue(key, out var db)) { errors.Add($"Parameter '{key}' does not exist in CIR '{oppLineId}'."); continue; }
 
-                var typText = CIR_NormText(p.ValueTypText);
-                var um      = CIR_NormText(p.Um);
+                var typText     = CIR_NormText(p.ValueTypText);
+                var listValues  = valueOptions.Options.TryGetValue(key, out var vopts) ? vopts : null;
+                if (db.ValueType == SPECS_VT_LIST && Specs_MatchListValue(typText, listValues, activeOnly: false) is { } listMatch)
+                    typText = listMatch.ValueCode;   // "smd" → "SMD": same value, list spelling
+                // Um (document unit) is read only and ignored. UmParameter empty → keep the DB value.
+                var umParameter = CIR_NormText(p.UmParameter) ?? db.UmParameter;
+                bool umChanged  = !string.Equals(umParameter, db.UmParameter, StringComparison.Ordinal);
 
                 if (p.ValueTyp.HasValue && typText != null)
                     errors.Add($"Parameter '{key}': ValueTyp and ValueTypText cannot both be informed.");
                 if (typText?.Length > 50)
                     errors.Add($"Parameter '{key}': ValueTypText exceeds 50 characters.");
-                if (um?.Length > 20)
-                    errors.Add($"Parameter '{key}': UM exceeds 20 characters.");
 
-                bool changed = p.ValueMin != db.ValueMin
-                            || p.ValueTyp != db.ValueTyp
-                            || p.ValueMax != db.ValueMax
-                            || !string.Equals(typText, CIR_NormText(db.ValueTypText), StringComparison.Ordinal)
-                            || !string.Equals(um,      CIR_NormText(db.Um),           StringComparison.Ordinal);
+                // a changed UM_PARAMETER must be one of the active options of the picking list (case-sensitive)
+                if (Specs_ValidateUmParameter(key, umParameter, db.UmParameter,
+                        unitOptions.Options.TryGetValue(key, out var opts) ? opts : null) is { } umError)
+                    errors.Add(umError);
+
+                bool valuesChanged = p.ValueMin != db.ValueMin
+                                  || p.ValueTyp != db.ValueTyp
+                                  || p.ValueMax != db.ValueMax
+                                  || !string.Equals(typText, CIR_NormText(db.ValueTypText), StringComparison.Ordinal);
+                bool changed = valuesChanged || umChanged;
+
+                // the row becomes MANUAL (reviewed): review rules by value type (same as TR_CIR_PRM_VALIDATE).
+                // A value disabled later in the list is accepted only if the row is already MANUAL and its values do not change.
+                if (changed)
+                {
+                    if (Specs_ValidateReviewedValue($"Parameter '{key}'", db.ValueType, p.ValueMin, p.ValueTyp, p.ValueMax, typText,
+                            listValues, allowInactive: db.IsManual && !valuesChanged, out var reviewedText) is { } reviewError)
+                    {
+                        errors.Add(reviewError);
+                        continue;
+                    }
+                    typText = reviewedText;
+                }
 
                 if (changed)
                     changes.Add(new CIR_PARAMETER
@@ -403,7 +480,7 @@ public partial class Class_Projects_Quality_Gates
                         ValueTyp     = p.ValueTyp,
                         ValueTypText = typText,
                         ValueMax     = p.ValueMax,
-                        Um           = um
+                        UmParameter  = umParameter
                     });
             }
 
@@ -425,7 +502,7 @@ public partial class Class_Projects_Quality_Gates
                     VALUE_TYP      = @valueTyp,
                     VALUE_TYP_TEXT = @valueTypText,
                     VALUE_MIN      = @valueMin,
-                    UM             = @um,
+                    UM_PARAMETER   = @umParameter,
                     DATA_SOURCE    = 'MANUAL',
                     MODIFIED_BY    = @user,
                     MODIFIED_DATE  = GETDATE()
@@ -454,7 +531,7 @@ public partial class Class_Projects_Quality_Gates
                             new SqlParameter("@valueTyp",     (object?)c.ValueTyp     ?? DBNull.Value),
                             new SqlParameter("@valueTypText", (object?)c.ValueTypText ?? DBNull.Value),
                             new SqlParameter("@valueMin",     (object?)c.ValueMin     ?? DBNull.Value),
-                            new SqlParameter("@um",           (object?)c.Um           ?? DBNull.Value),
+                            new SqlParameter("@umParameter",  c.UmParameter),
                             new SqlParameter("@user",         userRequester)
                         },
                         transaction: tx, ct: ct);
@@ -526,6 +603,94 @@ public partial class Class_Projects_Quality_Gates
 
             result.Message = $"CIR '{oppLineId}' reopened.";
             return result;
+        }
+        catch (Exception ex)
+        {
+            return CIR_Fail($"Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// "Validate" action: the responsible of the FORM_CIR deliverable confirms values read from the document
+    /// without changing them (DATA_SOURCE 'DOC' → 'MANUAL', audited by TR_CIR_PRM_AUDIT). Only rows pending review
+    /// (NeedsReview: DOC with a value or a document unit) are validated; keyParameters null/empty = all of them.
+    /// The CIR must be open. Each row must comply with the review rules of its value type (N: no text ·
+    /// L: active list value, no numbers · T: no numbers); rows that do not comply are NOT validated and are
+    /// listed in Message (fix them with CIR_SaveChanges). Values do not change, so the coverage does not change.
+    /// RecordsAffected = parameters validated. Success = false only on a technical error or a wrong request.
+    /// </summary>
+    public async Task<SqlActionResult> CIR_ValidateParameters(
+                                                                string OPPORTUNITY_LINE_ID,
+                                                                List<string>? keyParameters = null,
+                                                                string userRequester = "System",
+                                                                CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(OPPORTUNITY_LINE_ID))
+            return CIR_Fail("OPPORTUNITY_LINE_ID is required.");
+
+        var oppLineId = OPPORTUNITY_LINE_ID.Trim();
+
+        try
+        {
+            var check = await CIR_CheckWriteAccessAsync(oppLineId, userRequester, cancellationToken);
+            if (check.Error != null) return CIR_Fail(check.Error);
+            if (check.Header!.IsClosed)
+                return CIR_Fail($"CIR '{oppLineId}' is closed — reopen it before validating.");
+
+            var current = await CIR_LoadParametersAsync(oppLineId, cancellationToken);
+            if (current.Error != null) return CIR_Fail(current.Error);
+
+            var valueOptions = await CIR_LoadValueOptionsAsync(oppLineId, cancellationToken);
+            if (valueOptions.Error != null) return CIR_Fail(valueOptions.Error);
+            foreach (var p in current.Parameters)
+                p.ValueOptions = valueOptions.Options.TryGetValue(p.KeyParameter, out var vopts) ? vopts : [];
+
+            var keys = (keyParameters ?? []).Where(k => !string.IsNullOrWhiteSpace(k))
+                                            .Select(k => k.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var unknown = keys.Where(k => !current.Parameters.Any(p => string.Equals(p.KeyParameter, k, StringComparison.OrdinalIgnoreCase))).ToList();
+            if (unknown.Count > 0)
+                return CIR_Fail($"Parameters not in CIR '{oppLineId}': {string.Join(", ", unknown)}.");
+
+            var candidates = current.Parameters
+                .Where(p => p.NeedsReview && (keys.Count == 0 || keys.Contains(p.KeyParameter)))
+                .ToList();
+
+            var valid    = new List<string>();
+            var rejected = new List<string>();
+            foreach (var p in candidates)
+            {
+                var error = Specs_ValidateReviewedValue($"Parameter '{p.KeyParameter}'", p.ValueType,
+                                p.ValueMin, p.ValueTyp, p.ValueMax, p.ValueTypText, p.ValueOptions, allowInactive: false, out _);
+                if (error == null) valid.Add(p.KeyParameter); else rejected.Add(error);
+            }
+
+            int written = 0;
+            if (valid.Count > 0)
+            {
+                var sql = @"
+                    UPDATE dbo.MAS_SPEC_CIR_PARAMETERS
+                    SET    DATA_SOURCE = 'MANUAL', MODIFIED_BY = @user, MODIFIED_DATE = GETDATE()
+                    WHERE  OPPORTUNITY_LINE_ID = @oppLineId AND DATA_SOURCE <> 'MANUAL' AND IS_DELETED = 0
+                      AND  KEY_PARAMETER IN (" + string.Join(", ", valid.Select((_, i) => $"@k{i}")) + ")";
+
+                var tx = await _db.ExecuteInTransactionAsync(async (t, ct) =>
+                {
+                    await Specs_SetSessionUserAsync(userRequester, t, ct);
+                    var prms = new List<SqlParameter> { new("@oppLineId", oppLineId), new("@user", userRequester) };
+                    prms.AddRange(valid.Select((k, i) => new SqlParameter($"@k{i}", k)));
+
+                    var r = await _db.NonQueryAsync(sql, prms.ToArray(), transaction: t, ct: ct);
+                    if (!r.Success) throw new InvalidOperationException(r.Message);
+                    written = r.RecordsAffected;
+                }, cancellationToken);
+                if (!tx.Success) return CIR_Fail($"Error validating CIR: {tx.Message}");
+            }
+
+            var message = candidates.Count == 0
+                ? "No parameters pending review."
+                : $"{written} parameter(s) validated."
+                  + (rejected.Count > 0 ? $" {rejected.Count} not validated: {string.Join(" | ", rejected)}" : string.Empty);
+            return new SqlActionResult { Success = true, RecordsAffected = written, Message = message };
         }
         catch (Exception ex)
         {
@@ -662,11 +827,14 @@ public partial class Class_Projects_Quality_Gates
 
     // ── Phase 2 — private helpers ─────────────────────────────────────────────
 
+    private const int CIR_LEN_VALUE_TYP_TEXT = 50;   // MAS_SPEC_CIR_PARAMETERS.VALUE_TYP_TEXT nvarchar(50)
+
     private static SqlActionResult CIR_Fail(string message) => new() { Success = false, Message = message };
 
     /// <summary>Trim; empty → null.</summary>
     private static string? CIR_NormText(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
 
     /// <summary>"System" always allowed; otherwise the user must be the (non-empty) responsible.
     /// Compares the login part (before '@') case-insensitively, so email or samaccountname both work.</summary>
@@ -750,10 +918,10 @@ public partial class Class_Projects_Quality_Gates
     private async Task<(List<CIR_PARAMETER> Parameters, string? Error)> CIR_LoadParametersAsync(string oppLineId, CancellationToken ct)
     {
         const string sql = @"
-            SELECT p.KEY_PARAMETER, mp.PARAMETER_NAME, mp.PARAMETER_DEFAULT_UM,
+            SELECT p.KEY_PARAMETER, mp.PARAMETER_NAME, mp.PARAMETER_DEFAULT_UM, mp.VALUE_TYPE,
                    mp.PARAMETER_CATEGORY, pc.CATEGORY_PAR_NAME,
                    CASE WHEN fp.IS_DELETED = 0 THEN fp.TYPE_PARAMETER ELSE '' END AS TYPE_PARAMETER,
-                   p.VALUE_MIN, p.VALUE_TYP, p.VALUE_TYP_TEXT, p.VALUE_MAX, p.UM,
+                   p.VALUE_MIN, p.VALUE_TYP, p.VALUE_TYP_TEXT, p.VALUE_MAX, p.UM, p.UM_PARAMETER,
                    p.DATA_SOURCE, p.MODIFIED_BY, p.MODIFIED_DATE
             FROM   dbo.MAS_SPEC_CIR_PARAMETERS p
             JOIN   dbo.MAS_SPEC_CIR_HEADER h ON h.OPPORTUNITY_LINE_ID = p.OPPORTUNITY_LINE_ID
@@ -777,6 +945,7 @@ public partial class Class_Projects_Quality_Gates
                 KeyParameter  = GetString(row, "KEY_PARAMETER").Trim(),
                 ParameterName = GetString(row, "PARAMETER_NAME").Trim(),
                 TypeParameter = GetString(row, "TYPE_PARAMETER").Trim(),
+                ValueType     = Specs_NormValueType(GetString(row, "VALUE_TYPE")),
                 DefaultUm     = GetString(row, "PARAMETER_DEFAULT_UM").Trim(),
                 ParameterCategoryKey  = GetString(row, "PARAMETER_CATEGORY").Trim(),
                 ParameterCategoryName = GetString(row, "CATEGORY_PAR_NAME").Trim(),   // DB value has trailing \r\n + padding
@@ -785,6 +954,7 @@ public partial class Class_Projects_Quality_Gates
                 ValueTypText  = CIR_NormText(row["VALUE_TYP_TEXT"] as string),
                 ValueMax      = GetDecimalNullable(row, "VALUE_MAX"),
                 Um            = CIR_NormText(row["UM"] as string),
+                UmParameter   = GetString(row, "UM_PARAMETER").Trim(),
                 DataSource    = GetString(row, "DATA_SOURCE").Trim(),
                 ModifiedBy    = GetString(row, "MODIFIED_BY").Trim(),
                 ModifiedDate  = row["MODIFIED_DATE"] is DateTime md ? md : null
@@ -792,6 +962,22 @@ public partial class Class_Projects_Quality_Gates
         }
         return (list, null);
     }
+
+    /// <summary>
+    /// UM_PARAMETER picking list of every parameter of a CIR, keyed by KEY_PARAMETER:
+    /// active allowed units (MAS_SPEC_PARAMETER_UM active + MAS_SPEC_UM active), default UM first, then by code.
+    /// The current UM_PARAMETER is always included; if it is no longer allowed it comes with IsActive = false.
+    /// </summary>
+    private Task<(Dictionary<string, List<SPEC_UNIT_OPTION>> Options, string? Error)> CIR_LoadUnitOptionsAsync(
+        string oppLineId, CancellationToken ct)
+        => Specs_LoadUnitOptionsAsync("dbo.MAS_SPEC_CIR_PARAMETERS", "c.OPPORTUNITY_LINE_ID = @oppLineId",
+                                      () => [new SqlParameter("@oppLineId", oppLineId)], ct);
+
+    /// <summary>VALUE_TYP_TEXT picking list of every list parameter (VALUE_TYPE = 'L') of a CIR, keyed by KEY_PARAMETER.</summary>
+    private Task<(Dictionary<string, List<SPEC_VALUE_OPTION>> Options, string? Error)> CIR_LoadValueOptionsAsync(
+        string oppLineId, CancellationToken ct)
+        => Specs_LoadValueOptionsAsync("dbo.MAS_SPEC_CIR_PARAMETERS", "c.OPPORTUNITY_LINE_ID = @oppLineId", "VALUE_TYP_TEXT",
+                                       () => [new SqlParameter("@oppLineId", oppLineId)], ct);
 
     /// <summary>FORM_CIR deliverable of the opportunity (PCA/PCA_1, DELIVERABLE_CREATION_TYPE='FORM_CIR').
     /// DeliverableId=null when it does not exist.</summary>
@@ -823,12 +1009,13 @@ public partial class Class_Projects_Quality_Gates
     }
 
     /// <summary>
-    /// Inside <paramref name="tx"/>: closes the CIR if it is open and no mandatory (M) parameter
-    /// is empty (all 4 value fields NULL/blank). Returns true if it was closed by this call.
+    /// Inside <paramref name="tx"/>: closes the CIR if it is open and every mandatory (M) parameter is
+    /// informed according to its value type (N: MIN/TYP/MAX · L: text in the list · T: text).
+    /// Returns true if it was closed by this call.
     /// </summary>
     private async Task<bool> CIR_TryAutoCloseAsync(string oppLineId, string user, SqlTransaction tx, CancellationToken ct)
     {
-        const string sql = @"
+        string sql = $@"
             UPDATE h
             SET    CLOSED_DATE = SYSDATETIME(), CLOSED_BY = @user
             FROM   dbo.MAS_SPEC_CIR_HEADER h
@@ -839,10 +1026,10 @@ public partial class Class_Projects_Quality_Gates
                        FROM   dbo.MAS_SPEC_CIR_PARAMETERS p
                        JOIN   dbo.MAS_SPEC_FAMILY_VS_PARAMETER fp
                               ON fp.FAM_KEY = h.FAM_KEY AND fp.KEY_PARAMETER = p.KEY_PARAMETER
+                       LEFT JOIN dbo.MAS_SPEC_PARAMETER mp ON mp.KEY_PARAMETER = p.KEY_PARAMETER
                        WHERE  p.OPPORTUNITY_LINE_ID = h.OPPORTUNITY_LINE_ID
                          AND  p.IS_DELETED = 0 AND fp.IS_DELETED = 0 AND fp.TYPE_PARAMETER = 'M'
-                         AND  p.VALUE_MIN IS NULL AND p.VALUE_TYP IS NULL AND p.VALUE_MAX IS NULL
-                         AND  NULLIF(LTRIM(RTRIM(p.VALUE_TYP_TEXT)), '') IS NULL)";
+                         AND  NOT {Specs_SqlIsInformed("p", "mp", "VALUE_TYP_TEXT")})";
 
         var r = await _db.NonQueryAsync(sql,
             new[] { new SqlParameter("@oppLineId", oppLineId), new SqlParameter("@user", user) },
@@ -1032,11 +1219,15 @@ public partial class Class_Projects_Quality_Gates
             result.HeaderCreated = false;
         }
 
-        // 3f — load existing KEY_PARAMETERs from DB for this opportunity
+        // 3f — load existing KEY_PARAMETERs of this opportunity with their default UM
+        //      (MAS_SPEC_PARAMETER) and active allowed units (MAS_SPEC_PARAMETER_UM)
         const string sqlExistingParams = @"
-            SELECT KEY_PARAMETER
-            FROM   dbo.MAS_SPEC_CIR_PARAMETERS
-            WHERE  OPPORTUNITY_LINE_ID = @oppLineId AND IS_DELETED = 0";
+            SELECT c.KEY_PARAMETER, p.PARAMETER_DEFAULT_UM, p.VALUE_TYPE, a.UM_CODE
+            FROM   dbo.MAS_SPEC_CIR_PARAMETERS c
+            JOIN   dbo.MAS_SPEC_PARAMETER p ON p.KEY_PARAMETER = c.KEY_PARAMETER
+            LEFT JOIN dbo.MAS_SPEC_PARAMETER_UM a
+                   ON a.KEY_PARAMETER = c.KEY_PARAMETER AND a.IS_DELETED = 0
+            WHERE  c.OPPORTUNITY_LINE_ID = @oppLineId AND c.IS_DELETED = 0";
 
         var existingParamsQuery = await _db.SelectAsync(sqlExistingParams,
             new[] { new SqlParameter("@oppLineId", oppLineId) },
@@ -1049,12 +1240,34 @@ public partial class Class_Projects_Quality_Gates
             return;
         }
 
-        var dbKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var dbKeys       = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var defaultUms   = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var valueTypes   = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var allowedUnits = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (DataRow row in existingParamsQuery.DTResults.Rows)
-            dbKeys.Add(GetString(row, "KEY_PARAMETER").Trim());
+        {
+            var key = GetString(row, "KEY_PARAMETER").Trim();
+            if (dbKeys.Add(key))
+            {
+                defaultUms[key]   = GetString(row, "PARAMETER_DEFAULT_UM").Trim();
+                valueTypes[key]   = Specs_NormValueType(GetString(row, "VALUE_TYPE"));
+                allowedUnits[key] = new HashSet<string>(StringComparer.Ordinal);   // units are case-sensitive
+            }
+            var allowed = GetString(row, "UM_CODE").Trim();
+            if (allowed.Length > 0) allowedUnits[key].Add(allowed);
+        }
+
+        // active values of the list parameters (normalisation of the document text)
+        var listValues = await Specs_LoadActiveListValuesAsync(ct);
+        if (listValues.Error != null)
+        {
+            result.Success      = false;
+            result.ErrorMessage = listValues.Error;
+            return;
+        }
 
         // 3g — build parameter update list from JSON
-        var updates = new List<(string key, decimal? max, decimal? typ, string? typText, decimal? min, string? um)>();
+        var updates = new List<(string key, decimal? max, decimal? typ, string? typText, decimal? min, string? um, string umParameter)>();
 
         foreach (var jp in root.Parameters ?? [])
         {
@@ -1079,13 +1292,17 @@ public partial class Class_Projects_Quality_Gates
                 string.IsNullOrWhiteSpace(jp.Unit))
                 continue;
 
-            // value_typ: numeric first, text fallback
+            // value_typ: numeric parameter → numeric first, text fallback;
+            //            list / free-text parameter → always text (e.g. a ratio "14" stays text)
+            var valueType = valueTypes[key];
             decimal? valueTypNum  = null;
             string?  valueTypText = null;
 
             if (!string.IsNullOrWhiteSpace(jp.ValueTyp))
             {
-                if (decimal.TryParse(jp.ValueTyp,
+                if (valueType != SPECS_VT_NUMERIC)
+                    valueTypText = jp.ValueTyp.Trim();
+                else if (decimal.TryParse(jp.ValueTyp,
                         System.Globalization.NumberStyles.Any,
                         System.Globalization.CultureInfo.InvariantCulture,
                         out var parsed))
@@ -1094,13 +1311,26 @@ public partial class Class_Projects_Quality_Gates
                     valueTypText = jp.ValueTyp.Trim();
             }
 
+            // L → list spelling or warning · N with text → warning · longer than VALUE_TYP_TEXT → truncated (never blocks)
+            valueTypText = Specs_ResolveImportText(key, valueType, valueTypText,
+                               listValues.Values.TryGetValue(key, out var keyValues) ? keyValues : null,
+                               CIR_LEN_VALUE_TYP_TEXT, importWarnings);
+            var valueMin = ParseDecimalNullable(jp.ValueMin);
+            var valueMax = ParseDecimalNullable(jp.ValueMax);
+            if (valueType != SPECS_VT_NUMERIC && (valueMin.HasValue || valueMax.HasValue || valueTypNum.HasValue))
+                importWarnings.Add($"Parameter '{key}': text parameter received numeric values — the engineer must review them.");
+
+            // UM = unit as written in the document; UM_PARAMETER = always the default UM
+            var (um, umParameter) = Specs_ResolveImportUnit(key, jp.Unit, defaultUms[key], allowedUnits[key], importWarnings);
+
             updates.Add((
                 key,
-                ParseDecimalNullable(jp.ValueMax),
+                valueMax,
                 valueTypNum,
                 valueTypText,
-                ParseDecimalNullable(jp.ValueMin),
-                string.IsNullOrWhiteSpace(jp.Unit) ? null : jp.Unit.Trim()
+                valueMin,
+                um,
+                umParameter
             ));
         }
 
@@ -1117,6 +1347,7 @@ public partial class Class_Projects_Quality_Gates
                     VALUE_TYP_TEXT = @valueTypText,
                     VALUE_MIN      = @valueMin,
                     UM             = COALESCE(NULLIF(@um, ''), UM),
+                    UM_PARAMETER   = @umParameter,
                     DATA_SOURCE    = 'DOC',
                     MODIFIED_BY    = @user,
                     MODIFIED_DATE  = GETDATE()
@@ -1136,7 +1367,7 @@ public partial class Class_Projects_Quality_Gates
             {
                 await Specs_SetSessionUserAsync(userRequester, tx, innerCt);
 
-                foreach (var (key, max, typ, typText, min, um) in updates)
+                foreach (var (key, max, typ, typText, min, um, umParameter) in updates)
                 {
                     var updateParam = await _db.NonQueryAsync(sqlUpdateParam,
                         new[]
@@ -1150,6 +1381,7 @@ public partial class Class_Projects_Quality_Gates
                             new SqlParameter("@valueMin",     (object?)min     ?? DBNull.Value),
                             new SqlParameter("@um",           string.IsNullOrWhiteSpace(um)
                                                                   ? (object)DBNull.Value : um),
+                            new SqlParameter("@umParameter",  umParameter),
                             new SqlParameter("@user",         userRequester)
                         },
                         transaction: tx,

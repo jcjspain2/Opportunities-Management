@@ -13,15 +13,17 @@ namespace QUALITY_GATES.Classes;
 //  Rules
 //    - A spec has no status / close: it is maintained continuously; changes are traced by
 //      the audit triggers (TR_MAS_SPEC_MATNR_HEADER_AUD / TR_MAS_SPEC_MATNR_PARAMETERS_AUD).
-//    - Mandatory coverage (same as CIR): a TYPE_PARAMETER='M' parameter is informed when it
-//      has VALUE_MIN, VALUE_TYP, VALUE_TEXT or VALUE_MAX (UM does not count).
+//    - Mandatory coverage (same as CIR): a TYPE_PARAMETER='M' parameter is informed by VALUE_TYPE:
+//      N → VALUE_MIN / TYP / MAX · L → VALUE_TEXT exists in the list · T → VALUE_TEXT (UM does not count).
 //      Missing mandatory values are reported, never block a save.
 //    - Only real changes are written (diff against DB) → clean audit.
-//    - Every manual change marks the parameter DATA_SOURCE='MANUAL'. An external import never
-//      overwrites a MANUAL parameter. Specs_ReleaseManualParameters gives it back to imports.
-//    - Manual validation (blocks the save): MIN > MAX, numeric TYP + text TYP together,
-//      UM not active in MAS_SPEC_UM (catalog of base units AND variants; only when the UM changes),
-//      text / UM too long. Units are compared case-sensitively (mH ≠ MH).
+//    - DATA_SOURCE is the review state: DOC = read from the document (never restricted),
+//      MANUAL = reviewed by an engineer. Every manual change marks the parameter MANUAL;
+//      Specs_ValidateParameters marks reviewed values MANUAL without changing them.
+//      An external import never overwrites a MANUAL parameter. Specs_ReleaseManualParameters gives it back to imports.
+//    - Manual validation (blocks the save): MIN > MAX, numeric TYP + text TYP together, text too long,
+//      UM_PARAMETER not in the picking list (only when it changes), review rules by VALUE_TYPE
+//      (N: no text · L: active list value, no numbers · T: no numbers — also enforced by TR_MATNR_PRM_VALIDATE).
 //    - Write permission: @SPECS ("System" bypasses). Requires Docs/SQL_SPECS_MATNR_DataSource.sql.
 // ════════════════════════════════════════════════════════════════════════════════════════
 
@@ -58,11 +60,15 @@ public class SPEC_MATNR_PARAMETER
     public string   ParameterCategoryKey  { get; set; } = string.Empty;
     public string   ParameterCategoryName { get; set; } = string.Empty;
     public string   TypeParameter         { get; set; } = string.Empty; // M / O / I — from MAS_SPEC_FAMILY_VS_PARAMETER
+    public string   ValueType             { get; set; } = "N";          // N numeric · L list · T free text (MAS_SPEC_PARAMETER.VALUE_TYPE) — read only
     public decimal? ValueMax              { get; set; }
     public decimal? ValueTyp              { get; set; }
     public decimal? ValueMin              { get; set; }
-    public string?  ValueText             { get; set; }                 // typical value as text (DB: VALUE_TEXT)
-    public string   Um                    { get; set; } = string.Empty;
+    public string?  ValueText             { get; set; }                 // typical value as text (DB: VALUE_TEXT); L = a ValueOptions code
+    public List<SPEC_VALUE_OPTION> ValueOptions { get; set; } = [];     // picking list for ValueText when ValueType = L (MAS_SPEC_PARAMETER_VALUE)
+    public string   Um                    { get; set; } = string.Empty; // unit as written in the document — READ ONLY (never saved manually)
+    public string   UmParameter           { get; set; } = string.Empty; // UM_PARAMETER — unit of the value, edited with the picking list
+    public List<SPEC_UNIT_OPTION> UnitOptions { get; set; } = [];       // picking list for UmParameter (MAS_SPEC_PARAMETER_UM)
     public string   DefaultUm             { get; set; } = string.Empty;
     public string   DataSource            { get; set; } = "DOC";        // DOC = import · MANUAL = edited by a user
     public string   ModifiedBy            { get; set; } = string.Empty;
@@ -70,9 +76,26 @@ public class SPEC_MATNR_PARAMETER
     public bool     IsDeleted             { get; set; }
 
     public bool IsMandatory => TypeParameter == "M";
+
+    /// <summary>True if the document unit differs from UM_PARAMETER — to be reviewed by an engineer.</summary>
+    public bool UmDiffers => !string.IsNullOrWhiteSpace(Um)
+                             && !string.Equals(Um.Trim(), UmParameter?.Trim(), StringComparison.Ordinal);
     public bool IsManual    => DataSource == "MANUAL";
-    public bool HasValue    => ValueMin.HasValue || ValueTyp.HasValue || ValueMax.HasValue
-                               || !string.IsNullOrWhiteSpace(ValueText);
+
+    /// <summary>Informed for the mandatory coverage, by ValueType: N → MIN/TYP/MAX · L → text in the list · T → text.</summary>
+    public bool HasValue    => ValueType switch
+    {
+        "L" => ValueOptions.Any(o => string.Equals(o.ValueCode, ValueText?.Trim(), StringComparison.OrdinalIgnoreCase)),
+        "T" => !string.IsNullOrWhiteSpace(ValueText),
+        _   => ValueMin.HasValue || ValueTyp.HasValue || ValueMax.HasValue
+    };
+
+    /// <summary>List parameter whose text (from the document) is not a value of the list — the engineer must choose one.</summary>
+    public bool TextNotInList => ValueType == "L" && !string.IsNullOrWhiteSpace(ValueText) && !HasValue;
+
+    /// <summary>Value read from the document and not reviewed yet (DATA_SOURCE = DOC with some value or unit).</summary>
+    public bool NeedsReview => !IsManual && (ValueMin.HasValue || ValueTyp.HasValue || ValueMax.HasValue
+                                             || !string.IsNullOrWhiteSpace(ValueText) || !string.IsNullOrWhiteSpace(Um));
 }
 
 public class SPEC_MATNR_DETAIL
@@ -96,7 +119,8 @@ public class SPEC_PARAM_UPDATE
     public decimal? ValueTyp     { get; set; }
     public decimal? ValueMin     { get; set; }
     public string?  ValueText    { get; set; }
-    public string?  Um           { get; set; }
+    public string?  Um           { get; set; }   // import: document unit. Legacy manual methods: used as UmParameter when UmParameter is empty
+    public string?  UmParameter  { get; set; }   // manual edit: unit of the value (must be an allowed unit); empty = keep
 }
 
 /// <summary>Header audit row (snapshot of the header after the change).</summary>
@@ -131,8 +155,10 @@ public class SPEC_PARAMETER_AUDIT
     public decimal? NewValueMin   { get; set; }
     public string   OldValueText  { get; set; } = string.Empty;
     public string   NewValueText  { get; set; } = string.Empty;
-    public string   OldUm         { get; set; } = string.Empty;
+    public string   OldUm         { get; set; } = string.Empty;  // history only (UM is no longer audited since 2026-11-21)
     public string   NewUm         { get; set; } = string.Empty;
+    public string   OldUmParameter { get; set; } = string.Empty; // UM_PARAMETER — the audited unit
+    public string   NewUmParameter { get; set; } = string.Empty;
     public string   OldDataSource { get; set; } = string.Empty;
     public string   NewDataSource { get; set; } = string.Empty;
     public bool?    OldIsDeleted  { get; set; }
@@ -158,7 +184,6 @@ public partial class Class_Projects_Quality_Gates
     private const int SPECS_LEN_DESCRIPTION = 75;   // MAS_SPEC_MATNR_HEADER.DESCRIPTION nchar(75)
     private const int SPECS_LEN_FILE_PATH   = 200;  // SPEC_FILE_PATH nchar(200)
     private const int SPECS_LEN_VALUE_TEXT  = 200;  // MAS_SPEC_MATNR_PARAMETERS.VALUE_TEXT nvarchar(200)
-    private const int SPECS_LEN_UM          = 20;   // UM nchar(20)
 
     // ══ Read ══════════════════════════════════════════════════════════════════════════
 
@@ -173,7 +198,7 @@ public partial class Class_Projects_Quality_Gates
         bool includeDeleted = false,
         CancellationToken cancellationToken = default)
     {
-        string sql = @"
+        string sql = $@"
             SELECT h.MATNR, h.EDITION, h.DESCRIPTION, h.PRODUCT_CATEGOTY, h.PRODUCT_FAMILY,
                    h.SPEC_FILE_PATH, h.ISSUE_DATE, h.CREATED_BY, h.CREATED_DATE, h.IS_DELETED,
                    c.CAT_NAME, f.FAM_NAME,
@@ -184,18 +209,20 @@ public partial class Class_Projects_Quality_Gates
             LEFT JOIN dbo.MAS_SPEC_CATEGORY c ON c.CAT_KEY = h.PRODUCT_CATEGOTY
             LEFT JOIN dbo.MAS_SPEC_FAMILY   f ON f.CAT_KEY = h.PRODUCT_CATEGOTY AND f.FAM_KEY = h.PRODUCT_FAMILY
             OUTER APPLY (
-                SELECT SUM(CASE WHEN fvp.TYPE_PARAMETER = 'M' THEN 1 ELSE 0 END) AS M_TOTAL,
-                       SUM(CASE WHEN fvp.TYPE_PARAMETER = 'M'
-                                 AND (p.VALUE_MIN IS NOT NULL OR p.VALUE_TYP IS NOT NULL OR p.VALUE_MAX IS NOT NULL
-                                      OR NULLIF(LTRIM(RTRIM(p.VALUE_TEXT)), N'') IS NOT NULL)
-                                THEN 1 ELSE 0 END) AS M_FILLED,
-                       SUM(CASE WHEN p.DATA_SOURCE = N'MANUAL' THEN 1 ELSE 0 END) AS MANUAL_COUNT
-                FROM   dbo.MAS_SPEC_MATNR_PARAMETERS p
-                JOIN   dbo.MAS_SPEC_FAMILY_VS_PARAMETER fvp
-                         ON fvp.FAM_KEY = h.PRODUCT_FAMILY AND fvp.KEY_PARAMETER = p.KEY_PARAMETER AND fvp.IS_DELETED = 0
-                JOIN   dbo.MAS_SPEC_PARAMETER mp
-                         ON mp.KEY_PARAMETER = p.KEY_PARAMETER AND mp.IS_DELETED = 0
-                WHERE  p.MATNR = h.MATNR AND p.EDITION = h.EDITION AND p.IS_DELETED = 0
+                -- the 'informed' flag contains a subquery (list check), so it is computed per row and aggregated outside
+                SELECT SUM(CASE WHEN x.TYPE_PARAMETER = 'M' THEN 1 ELSE 0 END)                    AS M_TOTAL,
+                       SUM(CASE WHEN x.TYPE_PARAMETER = 'M' AND x.IS_INFORMED = 1 THEN 1 ELSE 0 END) AS M_FILLED,
+                       SUM(CASE WHEN x.DATA_SOURCE = N'MANUAL' THEN 1 ELSE 0 END)                 AS MANUAL_COUNT
+                FROM (
+                    SELECT fvp.TYPE_PARAMETER, p.DATA_SOURCE,
+                           CASE WHEN {Specs_SqlIsInformed("p", "mp", "VALUE_TEXT")} THEN 1 ELSE 0 END AS IS_INFORMED
+                    FROM   dbo.MAS_SPEC_MATNR_PARAMETERS p
+                    JOIN   dbo.MAS_SPEC_FAMILY_VS_PARAMETER fvp
+                             ON fvp.FAM_KEY = h.PRODUCT_FAMILY AND fvp.KEY_PARAMETER = p.KEY_PARAMETER AND fvp.IS_DELETED = 0
+                    JOIN   dbo.MAS_SPEC_PARAMETER mp
+                             ON mp.KEY_PARAMETER = p.KEY_PARAMETER AND mp.IS_DELETED = 0
+                    WHERE  p.MATNR = h.MATNR AND p.EDITION = h.EDITION AND p.IS_DELETED = 0
+                ) x
             ) cov
             WHERE  1 = 1";
 
@@ -307,7 +334,7 @@ public partial class Class_Projects_Quality_Gates
             SELECT a.AUDIT_ID, a.ACTION, a.CHANGED_BY, a.CHANGED_DATE, a.KEY_PARAMETER, mp.PARAMETER_NAME,
                    a.OLD_VALUE_MAX, a.NEW_VALUE_MAX, a.OLD_VALUE_TYP, a.NEW_VALUE_TYP,
                    a.OLD_VALUE_MIN, a.NEW_VALUE_MIN, a.OLD_VALUE_TEXT, a.NEW_VALUE_TEXT,
-                   a.OLD_UM, a.NEW_UM, a.OLD_DATA_SOURCE, a.NEW_DATA_SOURCE,
+                   a.OLD_UM, a.NEW_UM, a.OLD_UM_PARAMETER, a.NEW_UM_PARAMETER, a.OLD_DATA_SOURCE, a.NEW_DATA_SOURCE,
                    a.OLD_IS_DELETED, a.NEW_IS_DELETED
             FROM   dbo.MAS_SPEC_MATNR_PARAMETERS_AUDIT a
             LEFT JOIN dbo.MAS_SPEC_PARAMETER mp ON mp.KEY_PARAMETER = a.KEY_PARAMETER
@@ -343,6 +370,8 @@ public partial class Class_Projects_Quality_Gates
                 NewValueText  = GetString(r, "NEW_VALUE_TEXT").Trim(),
                 OldUm         = GetString(r, "OLD_UM").Trim(),
                 NewUm         = GetString(r, "NEW_UM").Trim(),
+                OldUmParameter = GetString(r, "OLD_UM_PARAMETER").Trim(),
+                NewUmParameter = GetString(r, "NEW_UM_PARAMETER").Trim(),
                 OldDataSource = GetString(r, "OLD_DATA_SOURCE").Trim(),
                 NewDataSource = GetString(r, "NEW_DATA_SOURCE").Trim(),
                 OldIsDeleted  = Specs_BoolOrNull(r, "OLD_IS_DELETED"),
@@ -357,7 +386,9 @@ public partial class Class_Projects_Quality_Gates
     /// <summary>
     /// Main save of the spec editor. Compares <paramref name="product"/> with the DB and, in one
     /// transaction, writes only what changed: header (description, file path, issue date) and
-    /// parameters (marked DATA_SOURCE='MANUAL'; UM saved as sent, "" → NULL).
+    /// parameters (marked DATA_SOURCE='MANUAL'). Units: Um (document unit) is READ ONLY and ignored;
+    /// UmParameter is saved — a changed one must be an active option of UnitOptions (picking list), empty keeps
+    /// the DB value. The UM_PARAMETER change is audited.
     /// Validation errors block the save; missing mandatory values are only reported in Message.
     /// RecordsAffected = header (0/1) + parameters written.
     /// </summary>
@@ -382,18 +413,15 @@ public partial class Class_Projects_Quality_Gates
             product.Header.IssueDate == DateOnly.MinValue ? null : product.Header.IssueDate);
         if (headerPlan.Error is { } eHdr) return Specs_Fail(eHdr);
 
-        // Parameter diff + validation
-        var units = await Specs_LoadActiveUnitsAsync(cancellationToken);
-        if (!units.Success) return Specs_Fail(units.ErrorMessage);
-
+        // Parameter diff + validation — Um (document unit) is read only; UmParameter is the edited unit
         var plan = Specs_BuildParameterPlan(
             current.Parameters,
             (product.Parameters ?? []).Select(p => new SPEC_PARAM_UPDATE
             {
                 KeyParameter = p.KeyParameter, ValueMax = p.ValueMax, ValueTyp = p.ValueTyp,
-                ValueMin = p.ValueMin, ValueText = p.ValueText, Um = p.Um
+                ValueMin = p.ValueMin, ValueText = p.ValueText, UmParameter = p.UmParameter
             }),
-            isImport: false, keepUmWhenEmpty: false, units.Data);
+            isImport: false);
         if (plan.Errors.Count > 0) return Specs_Fail(string.Join(Environment.NewLine, plan.Errors));
 
         if (!headerPlan.Changed && plan.Changes.Count == 0)
@@ -455,7 +483,8 @@ public partial class Class_Projects_Quality_Gates
     }
 
     /// <summary>
-    /// Updates one parameter (manual edit → DATA_SOURCE='MANUAL'). Pass null/empty um to keep the current UM.
+    /// Updates one parameter (manual edit → DATA_SOURCE='MANUAL'). <paramref name="um"/> is the unit of the value
+    /// (saved in UM_PARAMETER, must be an allowed unit of the parameter); null/empty keeps the current one.
     /// </summary>
     public Task<SqlActionResult> Specs_UpdateParameterValue(
         string matnr,
@@ -475,7 +504,9 @@ public partial class Class_Projects_Quality_Gates
 
     /// <summary>
     /// Updates several parameters in one transaction (manual edit → DATA_SOURCE='MANUAL').
-    /// Only parameters whose values really change are written. Null/empty Um keeps the current UM.
+    /// Only parameters whose values really change are written. The unit of the value is UmParameter (or Um, for
+    /// callers written before model B) → saved in UM_PARAMETER, must be an allowed unit; null/empty keeps the current one.
+    /// The document unit (UM) is never changed here.
     /// RecordsAffected = parameters written.
     /// </summary>
     public async Task<SqlActionResult> Specs_UpdateParametersBatch(
@@ -493,10 +524,14 @@ public partial class Class_Projects_Quality_Gates
         if (db.Data.Header.IsDeleted)
             return Specs_Fail($"Product '{db.Data.Header.Matnr}/{db.Data.Header.Edition}' is deleted. Enable it first.");
 
-        var units = await Specs_LoadActiveUnitsAsync(cancellationToken);
-        if (!units.Success) return Specs_Fail(units.ErrorMessage);
+        // Compatibility with callers written before model B: a Um sent without UmParameter is the edited unit
+        var mapped = updates.Select(u => new SPEC_PARAM_UPDATE
+        {
+            KeyParameter = u.KeyParameter, ValueMax = u.ValueMax, ValueTyp = u.ValueTyp, ValueMin = u.ValueMin,
+            ValueText = u.ValueText, UmParameter = Specs_NullIfBlank(u.UmParameter) ?? Specs_NullIfBlank(u.Um)
+        });
 
-        var plan = Specs_BuildParameterPlan(db.Data.Parameters, updates, isImport: false, keepUmWhenEmpty: true, units.Data);
+        var plan = Specs_BuildParameterPlan(db.Data.Parameters, mapped, isImport: false);
         if (plan.Errors.Count > 0) return Specs_Fail(string.Join(Environment.NewLine, plan.Errors));
         if (plan.Changes.Count == 0) return Specs_NoChange("No changes to save.");
 
@@ -557,6 +592,82 @@ public partial class Class_Projects_Quality_Gates
         return released == 0
             ? Specs_NoChange("No manual parameters to release.")
             : new SqlActionResult { Success = true, RecordsAffected = released, Message = $"{released} parameter(s) released to imports." };
+    }
+
+    /// <summary>
+    /// "Validate" action: the engineer confirms values read from the document without changing them
+    /// (DATA_SOURCE 'DOC' → 'MANUAL', audited). Only rows pending review (NeedsReview: DOC with a value or a document
+    /// unit) are validated; keyParameters null/empty = all of them.
+    /// Each row must comply with the review rules of its value type (N: no text · L: active list value, no numbers ·
+    /// T: no numbers); rows that do not comply are NOT validated and are listed in Message (fix them in the editor).
+    /// Validated rows are protected from later imports (Specs_ReleaseManualParameters undoes it).
+    /// RecordsAffected = parameters validated. Success = false only on a technical error or a wrong request.
+    /// </summary>
+    public async Task<SqlActionResult> Specs_ValidateParameters(
+        string matnr,
+        string edition,
+        List<string>? keyParameters = null,
+        string userRequester = "System",
+        CancellationToken cancellationToken = default)
+    {
+        if (await Specs_CatalogPermissionAsync(userRequester, cancellationToken) is { } ePerm) return Specs_Fail(ePerm);
+
+        var db = await Specs_LoadProductAsync(matnr, edition, cancellationToken);
+        if (!db.Success) return Specs_Fail(db.ErrorMessage);
+        if (db.Data.Header.IsDeleted)
+            return Specs_Fail($"Product '{db.Data.Header.Matnr}/{db.Data.Header.Edition}' is deleted. Enable it first.");
+
+        var keys = (keyParameters ?? []).Where(k => !string.IsNullOrWhiteSpace(k))
+                                        .Select(k => k.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var unknown = keys.Where(k => !db.Data.Parameters.Any(p => string.Equals(p.KeyParameter, k, StringComparison.OrdinalIgnoreCase))).ToList();
+        if (unknown.Count > 0)
+            return Specs_Fail($"Not active parameters of this product: {string.Join(", ", unknown)}.");
+
+        // only rows with something read from the document (an empty row validated would be protected from imports)
+        var candidates = db.Data.Parameters
+            .Where(p => p.NeedsReview && (keys.Count == 0 || keys.Contains(p.KeyParameter)))
+            .ToList();
+
+        var valid    = new List<string>();
+        var rejected = new List<string>();
+        foreach (var p in candidates)
+        {
+            var error = Specs_ValidateReviewedValue($"'{p.ParameterName}' ({p.KeyParameter})", p.ValueType,
+                            p.ValueMin, p.ValueTyp, p.ValueMax, p.ValueText, p.ValueOptions, allowInactive: false, out _);
+            if (error == null) valid.Add(p.KeyParameter); else rejected.Add(error);
+        }
+
+        int written = 0;
+        if (valid.Count > 0)
+        {
+            var sql = @"
+                UPDATE dbo.MAS_SPEC_MATNR_PARAMETERS
+                SET    DATA_SOURCE = @manual, MODIFIED_BY = @user, MODIFIED_DATE = GETDATE()
+                WHERE  MATNR = @m AND EDITION = @e AND DATA_SOURCE <> @manual AND IS_DELETED = 0
+                  AND  KEY_PARAMETER IN (" + string.Join(", ", valid.Select((_, i) => $"@k{i}")) + ")";
+
+            var tx = await _db.ExecuteInTransactionAsync(async (t, ct) =>
+            {
+                await Specs_SetSessionUserAsync(userRequester, t, ct);
+                var prms = new List<SqlParameter>
+                {
+                    new("@m", db.Data.Header.Matnr), new("@e", db.Data.Header.Edition),
+                    new("@user", userRequester), new("@manual", SPECS_SRC_MANUAL)
+                };
+                prms.AddRange(valid.Select((k, i) => new SqlParameter($"@k{i}", k)));
+
+                var r = await _db.NonQueryAsync(sql, prms.ToArray(), transaction: t, ct: ct);
+                if (!r.Success) throw new InvalidOperationException(r.Message);
+                written = r.RecordsAffected;
+            }, cancellationToken);
+            if (!tx.Success) return tx;
+        }
+
+        var message = candidates.Count == 0
+            ? "No parameters pending review."
+            : $"{written} parameter(s) validated."
+              + (rejected.Count > 0 ? $" {rejected.Count} not validated:{Environment.NewLine}{string.Join(Environment.NewLine, rejected)}" : string.Empty);
+        return new SqlActionResult { Success = true, RecordsAffected = written, Message = message };
     }
 
     /// <summary>Soft-deletes a product (IS_DELETED = 1).</summary>
@@ -651,10 +762,10 @@ public partial class Class_Projects_Quality_Gates
 
         var pq = await _db.SelectAsync(@"
             SELECT p.MATNR, p.EDITION, p.KEY_PARAMETER,
-                   p.VALUE_MAX, p.VALUE_TYP, p.VALUE_MIN, p.VALUE_TEXT, p.UM, p.DATA_SOURCE,
+                   p.VALUE_MAX, p.VALUE_TYP, p.VALUE_MIN, p.VALUE_TEXT, p.UM, p.UM_PARAMETER, p.DATA_SOURCE,
                    p.MODIFIED_BY, p.MODIFIED_DATE, p.IS_DELETED,
                    mp.PARAMETER_NAME, mp.PARAMETER_DEFAULT_UM, mp.PARAMETER_CATEGORY, pc.CATEGORY_PAR_NAME,
-                   fvp.TYPE_PARAMETER
+                   mp.VALUE_TYPE, fvp.TYPE_PARAMETER
             FROM   dbo.MAS_SPEC_MATNR_PARAMETERS p
             JOIN   dbo.MAS_SPEC_PARAMETER mp
                      ON mp.KEY_PARAMETER = p.KEY_PARAMETER AND mp.IS_DELETED = 0
@@ -679,17 +790,33 @@ public partial class Class_Projects_Quality_Gates
                 ParameterCategoryKey  = GetString(row, "PARAMETER_CATEGORY").Trim(),
                 ParameterCategoryName = GetString(row, "CATEGORY_PAR_NAME").Trim(),
                 TypeParameter         = GetString(row, "TYPE_PARAMETER").Trim(),
+                ValueType             = Specs_NormValueType(GetString(row, "VALUE_TYPE")),
                 ValueMax              = GetDecimalNullable(row, "VALUE_MAX"),
                 ValueTyp              = GetDecimalNullable(row, "VALUE_TYP"),
                 ValueMin              = GetDecimalNullable(row, "VALUE_MIN"),
                 ValueText             = Specs_NullIfBlank(GetString(row, "VALUE_TEXT")),
                 Um                    = GetString(row, "UM").Trim(),
+                UmParameter           = GetString(row, "UM_PARAMETER").Trim(),
                 DefaultUm             = GetString(row, "PARAMETER_DEFAULT_UM").Trim(),
                 DataSource            = GetString(row, "DATA_SOURCE").Trim(),
                 ModifiedBy            = GetString(row, "MODIFIED_BY").Trim(),
                 ModifiedDate          = GetDateTime(row, "MODIFIED_DATE"),
                 IsDeleted             = GetBoolean(row, "IS_DELETED")
             });
+
+        // UM_PARAMETER picking list per parameter (MAS_SPEC_PARAMETER_UM)
+        var unitOptions = await Specs_LoadUnitOptionsAsync("dbo.MAS_SPEC_MATNR_PARAMETERS", "c.MATNR = @m AND c.EDITION = @e",
+                                                           () => P2("@m", m, "@e", e), ct);
+        if (unitOptions.Error != null) return OperationResult<SPEC_MATNR_DETAIL>.Fail(unitOptions.Error);
+        foreach (var p in detail.Parameters)
+            p.UnitOptions = unitOptions.Options.TryGetValue(p.KeyParameter, out var opts) ? opts : [];
+
+        // VALUE_TEXT picking list of the list parameters (MAS_SPEC_PARAMETER_VALUE)
+        var valueOptions = await Specs_LoadValueOptionsAsync("dbo.MAS_SPEC_MATNR_PARAMETERS", "c.MATNR = @m AND c.EDITION = @e",
+                                                             "VALUE_TEXT", () => P2("@m", m, "@e", e), ct);
+        if (valueOptions.Error != null) return OperationResult<SPEC_MATNR_DETAIL>.Fail(valueOptions.Error);
+        foreach (var p in detail.Parameters)
+            p.ValueOptions = valueOptions.Options.TryGetValue(p.KeyParameter, out var vopts) ? vopts : [];
 
         header.MandatoryTotal   = detail.MandatoryTotal;
         header.MandatoryFilled  = detail.MandatoryFilled;
@@ -729,17 +856,6 @@ public partial class Class_Projects_Quality_Gates
                 transaction: t, ct: ct);
             if (!r.Success) throw new InvalidOperationException(r.Message);
         }, cancellationToken);
-    }
-
-    private async Task<OperationResult<HashSet<string>>> Specs_LoadActiveUnitsAsync(CancellationToken ct)
-    {
-        var q = await _db.SelectAsync("SELECT UM_CODE FROM dbo.MAS_SPEC_UM WHERE IS_DELETED = 0", null, ct);
-        if (!q.Success || q.DTResults == null)
-            return OperationResult<HashSet<string>>.Fail($"Error reading units of measure: {q.Message}");
-
-        var set = new HashSet<string>(StringComparer.Ordinal);   // units are case-sensitive (mH ≠ MH)
-        foreach (DataRow r in q.DTResults.Rows) set.Add(GetString(r, "UM_CODE").Trim());
-        return OperationResult<HashSet<string>>.Ok(set);
     }
 
     // ── Header plan ──────────────────────────────────────────────────────────────────
@@ -804,15 +920,21 @@ public partial class Class_Projects_Quality_Gates
 
     /// <summary>
     /// Compares the requested values with the current DB values and returns what must be written.
-    /// isImport = true: no blocking validation (problems become warnings) and MANUAL parameters are protected.
-    /// keepUmWhenEmpty = true: a null/empty Um keeps the current UM; false: it clears it.
+    /// Units (model B):
+    ///   isImport = true  → UM = document unit (empty keeps the DB value, > 20 truncated), UM_PARAMETER = ALWAYS
+    ///                      the default UM; differences become warnings. No blocking validation (problems become
+    ///                      warnings) and MANUAL parameters are protected (nothing written, not even units).
+    ///   isImport = false → UM is read only (kept); UmParameter is the edited unit (empty keeps the DB value) and a
+    ///                      changed one must be an active option of the picking list (cur.UnitOptions).
+    /// Text (VALUE_TYPE):
+    ///   isImport = true  → Specs_ResolveImportText (L: list spelling or warning, N: warning, truncated if long).
+    ///   isImport = false → L text written with the list spelling; a changed row must pass the review rules
+    ///                      (Specs_ValidateReviewedValue) because it becomes MANUAL.
     /// </summary>
     private static Specs_ParamPlan Specs_BuildParameterPlan(
         List<SPEC_MATNR_PARAMETER> current,
         IEnumerable<SPEC_PARAM_UPDATE> updates,
-        bool isImport,
-        bool keepUmWhenEmpty,
-        HashSet<string> activeUnits)
+        bool isImport)
     {
         var plan  = new Specs_ParamPlan();
         var byKey = current.ToDictionary(p => p.KeyParameter, StringComparer.OrdinalIgnoreCase);
@@ -834,35 +956,62 @@ public partial class Class_Projects_Quality_Gates
             var typ  = Specs_Round4(upd.ValueTyp);
             var min  = Specs_Round4(upd.ValueMin);
             var text = Specs_NullIfBlank(upd.ValueText);
-            var um   = Specs_NullIfBlank(upd.Um) ?? (keepUmWhenEmpty ? Specs_NullIfBlank(cur.Um) : null);
-            bool umChanged = !string.Equals(um, Specs_NullIfBlank(cur.Um), StringComparison.Ordinal);
             var label = $"'{cur.ParameterName}' ({key})";
+            var curUm          = Specs_NullIfBlank(cur.Um);
+            var curUmParameter = cur.UmParameter;
+
+            // Text by value type
+            var textWarnings = new List<string>();
+            if (isImport)
+            {
+                // L → list spelling or warning · N → warning · long → truncated (never blocks)
+                text = Specs_ResolveImportText(key, cur.ValueType, text, cur.ValueOptions.Where(o => o.IsActive).ToList(),
+                                               SPECS_LEN_VALUE_TEXT, textWarnings);
+                if (cur.ValueType != SPECS_VT_NUMERIC && (min.HasValue || typ.HasValue || max.HasValue))
+                    textWarnings.Add($"Parameter '{key}': text parameter received numeric values — the engineer must review them.");
+            }
+            else if (cur.ValueType == SPECS_VT_LIST && Specs_MatchListValue(text, cur.ValueOptions, activeOnly: false) is { } listMatch)
+                text = listMatch.ValueCode;   // "smd" → "SMD": same value, list spelling
+
+            // Units
+            string? um;
+            string  umParameter;
+            var unitWarnings = new List<string>();
+            if (isImport)
+            {
+                var allowed = cur.UnitOptions.Where(o => o.IsActive).Select(o => o.UmCode);
+                var (docUm, defUm) = Specs_ResolveImportUnit(key, upd.Um, cur.DefaultUm, allowed, unitWarnings);
+                um          = docUm ?? curUm;          // empty document unit keeps the DB value
+                umParameter = defUm;                   // always the default UM
+            }
+            else
+            {
+                um          = curUm;                   // document unit is read only
+                umParameter = Specs_NullIfBlank(upd.UmParameter) ?? curUmParameter;
+            }
+            bool umChanged          = !string.Equals(um, curUm, StringComparison.Ordinal);
+            bool umParameterChanged = !string.Equals(umParameter, curUmParameter, StringComparison.Ordinal);
 
             // Validation
             var issues = new List<string>();
             if (typ.HasValue && text != null)            issues.Add($"{label}: numeric typical value and text typical value cannot both be informed.");
             if (min.HasValue && max.HasValue && min > max) issues.Add($"{label}: MIN ({min}) is greater than MAX ({max}).");
             if ((text?.Length ?? 0) > SPECS_LEN_VALUE_TEXT) issues.Add($"{label}: text value exceeds {SPECS_LEN_VALUE_TEXT} characters.");
-            if ((um?.Length ?? 0) > SPECS_LEN_UM)          issues.Add($"{label}: UM exceeds {SPECS_LEN_UM} characters.");
+            if (!isImport && Specs_ValidateUmParameter(key, umParameter, curUmParameter, cur.UnitOptions) is { } umError)
+                issues.Add(umError);
 
-            if (isImport)
+            if (issues.Count > 0)
             {
-                if (issues.Count > 0) { plan.Warnings.AddRange(issues.Select(i => i + " Skipped.")); continue; }
-                if (um != null && umChanged && !activeUnits.Contains(um))
-                    plan.Warnings.Add($"{label}: UM '{um}' is not an active unit of measure (saved as received).");
-            }
-            else
-            {
-                if (um != null && umChanged && !activeUnits.Contains(um))
-                    issues.Add($"{label}: UM '{um}' does not exist or is disabled.");
-                if (issues.Count > 0) { plan.Errors.AddRange(issues); continue; }
+                if (isImport) plan.Warnings.AddRange(issues.Select(i => i + " Skipped."));
+                else          plan.Errors.AddRange(issues);
+                continue;
             }
 
             // Diff
-            bool changed = cur.ValueMax != max || cur.ValueTyp != typ || cur.ValueMin != min
-                        || !string.Equals(Specs_NullIfBlank(cur.ValueText), text, StringComparison.Ordinal)
-                        || umChanged;
-            if (!changed) { plan.Unchanged++; continue; }
+            bool valuesChanged = cur.ValueMax != max || cur.ValueTyp != typ || cur.ValueMin != min
+                              || !string.Equals(Specs_NullIfBlank(cur.ValueText), text, StringComparison.Ordinal);
+            bool changed = valuesChanged || umChanged || umParameterChanged;
+            if (!changed) { plan.Unchanged++; plan.Warnings.AddRange(unitWarnings); plan.Warnings.AddRange(textWarnings); continue; }
 
             if (isImport && cur.IsManual)
             {
@@ -871,9 +1020,25 @@ public partial class Class_Projects_Quality_Gates
                 continue;
             }
 
+            // Manual save → the row becomes MANUAL (reviewed): review rules by value type (same as TR_MATNR_PRM_VALIDATE).
+            // A value disabled later in the list is accepted only if the row is already MANUAL and its values do not change.
+            if (!isImport)
+            {
+                if (Specs_ValidateReviewedValue(label, cur.ValueType, min, typ, max, text, cur.ValueOptions,
+                        allowInactive: cur.IsManual && !valuesChanged, out var reviewedText) is { } reviewError)
+                {
+                    plan.Errors.Add(reviewError);
+                    continue;
+                }
+                text = reviewedText;
+            }
+
+            plan.Warnings.AddRange(unitWarnings);
+            plan.Warnings.AddRange(textWarnings);
             plan.Changes.Add(new SPEC_PARAM_UPDATE
             {
-                KeyParameter = cur.KeyParameter, ValueMax = max, ValueTyp = typ, ValueMin = min, ValueText = text, Um = um
+                KeyParameter = cur.KeyParameter, ValueMax = max, ValueTyp = typ, ValueMin = min, ValueText = text,
+                Um = um, UmParameter = umParameter
             });
         }
 
@@ -887,7 +1052,8 @@ public partial class Class_Projects_Quality_Gates
     {
         string sql = @"
             UPDATE dbo.MAS_SPEC_MATNR_PARAMETERS
-            SET    VALUE_MAX = @max, VALUE_TYP = @typ, VALUE_MIN = @min, VALUE_TEXT = @text, UM = @um,
+            SET    VALUE_MAX = @max, VALUE_TYP = @typ, VALUE_MIN = @min, VALUE_TEXT = @text,
+                   UM = @um, UM_PARAMETER = @ump,
                    DATA_SOURCE = @src, MODIFIED_BY = @user, MODIFIED_DATE = GETDATE()
             WHERE  MATNR = @m AND EDITION = @e AND KEY_PARAMETER = @k AND IS_DELETED = 0";
         if (protectManual) sql += " AND DATA_SOURCE <> N'MANUAL'";   // never overwrite a manual value, even on a race
@@ -902,7 +1068,8 @@ public partial class Class_Projects_Quality_Gates
                     new SqlParameter("@typ",  (object?)c.ValueTyp  ?? DBNull.Value),
                     new SqlParameter("@min",  (object?)c.ValueMin  ?? DBNull.Value),
                     new SqlParameter("@text", (object?)c.ValueText ?? DBNull.Value),
-                    new SqlParameter("@um",   (object?)c.Um        ?? DBNull.Value),
+                    new SqlParameter("@um",   (object?)Specs_NullIfBlank(c.Um) ?? DBNull.Value),
+                    new SqlParameter("@ump",  c.UmParameter ?? throw new InvalidOperationException($"UM_PARAMETER missing for '{c.KeyParameter}'.")),
                     new SqlParameter("@src",  dataSource),
                     new SqlParameter("@user", userRequester)
                 ],
